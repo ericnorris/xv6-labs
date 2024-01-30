@@ -1,0 +1,6 @@
+IndentWidth: 2
+BreakBeforeBraces: Linux
+AlwaysBreakAfterReturnType: All
+AllowShortLoopsOnASingleLine: true
+AllowShortBlocksOnASingleLine: Empty
+SortIncludes: Never
