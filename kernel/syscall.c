@@ -102,6 +102,7 @@ extern uint64 sys_link(void);
 extern uint64 sys_mkdir(void);
 extern uint64 sys_close(void);
 extern uint64 sys_trace(void);
+extern uint64 sys_sysinfo(void);
 
 // disable clang-format for the following arrays,
 // see https://github.com/llvm/llvm-project/issues/61560)
@@ -133,6 +134,7 @@ static uint64 (*syscalls[])(void) = {
   [SYS_mkdir]   sys_mkdir,
   [SYS_close]   sys_close,
   [SYS_trace]   sys_trace,
+  [SYS_sysinfo] sys_sysinfo,
 };
 
 // An array mapping syscall numbers from syscall.h
@@ -160,6 +162,7 @@ static const char *syscall_names[] = {
   [SYS_mkdir]   "mkdir",
   [SYS_close]   "close",
   [SYS_trace]   "trace",
+  [SYS_sysinfo] "sysinfo",
 };
 
 // clang-format on
