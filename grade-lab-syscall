@@ -14,7 +14,7 @@ def test_answers():
 @test(5, "trace 32 grep")
 def test_trace_32_grep():
     r.run_qemu(shell_script([
-        'trace 32 grep hello README'
+        'trace 32 grep hello README-original'
     ]))
     r.match('^\\d+: syscall read -> 1023')
     r.match('^\\d+: syscall read -> 961')
@@ -24,7 +24,7 @@ def test_trace_32_grep():
 @test(5, "trace all grep")
 def test_trace_all_grep():
     r.run_qemu(shell_script([
-        'trace 2147483647 grep hello README'
+        'trace 2147483647 grep hello README-original'
     ]))
     r.match('^\\d+: syscall trace -> 0')
     r.match('^\\d+: syscall exec -> 3')
