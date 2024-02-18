@@ -23,6 +23,8 @@ in
       gcc
       qemu
       gdbWrapped
+      clang
+      clang.cc.python
     ];
 
     nativeBuildInputs = with pkgs'.buildPackages; [
@@ -39,5 +41,12 @@ in
 
       # make customize the PS1 to make it clear we're in a shell for the xv6-labs
       export PS1="\n\[\033[1;32m\][xv6-labs-shell:\w]\$\[\033[0m\] "
+
+      # link .git/hooks to .githooks/
+      if ! [[ -f .git/hooks/sentinel ]]; then
+        echo "shellHook: converting .git/hooks to symlink"
+
+        rm -rf .git/hooks && ln --symbolic --relative .githooks .git/hooks
+      fi
     '';
   }
