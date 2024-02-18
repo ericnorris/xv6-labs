@@ -38,5 +38,5 @@ Then, once you've implemented the lab, merge it back into main:
 
 ```sh
 git checkout main
-git merge xv6-labs-2023/$LAB
+git merge --no-ff xv6-labs-2023/$LAB
 ```
