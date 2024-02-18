@@ -1,6 +1,16 @@
+BasedOnStyle: LLVM
+
 IndentWidth: 2
+
 BreakBeforeBraces: Linux
-AlwaysBreakAfterReturnType: All
-AllowShortLoopsOnASingleLine: true
+
+AlwaysBreakAfterReturnType:           AllDefinitions
+AlwaysBreakAfterDefinitionReturnType: All
+
+AllowShortLoopsOnASingleLine:  true
 AllowShortBlocksOnASingleLine: Empty
+
+AlignConsecutiveMacros: Consecutive
+
+# TODO: sorting includes breaks compilation
 SortIncludes: Never
