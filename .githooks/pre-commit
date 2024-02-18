@@ -1,0 +1,8 @@
+#!/bin/bash
+#
+# Format any diffs with git-clang-format.
+
+echo "pre-commit: Formatting changed files with git-clang-format."
+echo "If any files are changed, please review the changes and commit again."
+
+exec git clang-format --staged

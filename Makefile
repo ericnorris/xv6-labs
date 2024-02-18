@@ -62,7 +62,7 @@ endif
 
 # riscv64-unknown-elf- or riscv64-linux-gnu-
 # perhaps in /opt/riscv/bin
-#TOOLPREFIX = 
+#TOOLPREFIX =
 
 # Try to infer the correct TOOLPREFIX if not set
 ifndef TOOLPREFIX
@@ -174,6 +174,7 @@ mkfs/mkfs: mkfs/mkfs.c $K/fs.h $K/param.h
 UPROGS=\
 	$U/_cat\
 	$U/_echo\
+	$U/_find\
 	$U/_forktest\
 	$U/_grep\
 	$U/_init\
@@ -181,12 +182,18 @@ UPROGS=\
 	$U/_ln\
 	$U/_ls\
 	$U/_mkdir\
+	$U/_pingpong\
+	$U/_primes\
 	$U/_rm\
 	$U/_sh\
+	$U/_sleep\
 	$U/_stressfs\
+	$U/_sysinfotest\
+	$U/_trace\
 	$U/_usertests\
 	$U/_grind\
 	$U/_wc\
+	$U/_xargs\
 	$U/_zombie\
 
 
@@ -260,12 +267,12 @@ ifeq ($(LAB),util)
 endif
 
 
-fs.img: mkfs/mkfs README $(UEXTRA) $(UPROGS)
-	mkfs/mkfs fs.img README $(UEXTRA) $(UPROGS)
+fs.img: mkfs/mkfs README README-original $(UEXTRA) $(UPROGS)
+	mkfs/mkfs fs.img README README-original $(UEXTRA) $(UPROGS)
 
 -include kernel/*.d user/*.d
 
-clean: 
+clean:
 	rm -f *.tex *.dvi *.idx *.aux *.log *.ind *.ilg \
 	*/*.o */*.d */*.asm */*.sym \
 	$U/initcode $U/initcode.out $K/kernel fs.img \
