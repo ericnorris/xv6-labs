@@ -45,7 +45,7 @@ kvmmake(void)
 
   // allocate and map a kernel stack for each process.
   proc_mapstacks(kpgtbl);
-  
+
   return kpgtbl;
 }
 
@@ -154,7 +154,7 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
 
   if(size == 0)
     panic("mappages: size");
-  
+
   a = va;
   last = va + size - PGSIZE;
   for(;;){
@@ -345,7 +345,7 @@ void
 uvmclear(pagetable_t pagetable, uint64 va)
 {
   pte_t *pte;
-  
+
   pte = walk(pagetable, va, 0);
   if(pte == 0)
     panic("uvmclear");
@@ -448,4 +448,38 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   } else {
     return -1;
   }
+}
+
+void
+vmprint_rec(pagetable_t pagetable, int indent)
+{
+  // there are 2^9 = 512 PTEs in a page table
+  for (int i = 0; i < 512; i++) {
+    pte_t pte = pagetable[i];
+    uint64 pa = PTE2PA(pte);
+
+    if (!(pte & PTE_V)) {
+      continue;
+    }
+
+    for (int j = 0; j < indent; j++) {
+      printf(" ..");
+    }
+
+    printf("%d: pte %p pa %p\n", i, pte, pa);
+
+    if ((pte & (PTE_R | PTE_W | PTE_X)) == 0) {
+      // this PTE points to a lower-level page table
+      vmprint_rec((pagetable_t)pa, indent + 1);
+    }
+  }
+}
+
+// Recursively print page-table pages.
+void
+vmprint(pagetable_t pagetable)
+{
+  printf("page table %p\n", pagetable);
+
+  vmprint_rec(pagetable, 1);
 }
