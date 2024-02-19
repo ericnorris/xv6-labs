@@ -170,3 +170,11 @@ sys_sysinfo(void)
   return copyout(myproc()->pagetable, struct_sysinfo_addr, (char *)&s,
                  sizeof(s));
 }
+
+uint64
+sys_backtrace(void)
+{
+  backtrace();
+
+  return 0;
+}

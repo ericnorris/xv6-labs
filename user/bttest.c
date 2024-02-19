@@ -5,6 +5,6 @@
 int
 main(int argc, char *argv[])
 {
-  sleep(1);
+  backtrace();
   exit(0);
 }
