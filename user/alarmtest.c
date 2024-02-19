@@ -152,7 +152,7 @@ slow_handler()
     printf("test2 failed: alarm handler called more than once\n");
     exit(1);
   }
-  for (int i = 0; i < 1000*500000; i++) {
+  for (int i = 0; i < 2000 * 500000; i++) {
     asm volatile("nop"); // avoid compiler optimizing away loop
   }
   sigalarm(0, 0);

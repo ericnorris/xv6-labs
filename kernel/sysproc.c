@@ -172,6 +172,46 @@ sys_sysinfo(void)
 }
 
 uint64
+sys_sigalarm(void)
+{
+  // the number of ticks until the alarm handler should be called
+  int tick_interval;
+
+  // a pointer to the alarm handler function
+  void (*alarm_handler)();
+
+  argint(0, &tick_interval);
+  argaddr(1, (uint64 *)&alarm_handler);
+
+  struct proc *p = myproc();
+
+  p->alarm_interval = tick_interval;
+  p->alarm_handler  = alarm_handler;
+  p->alarm_ticks    = 0;
+
+  return 0;
+}
+
+uint64
+sys_sigreturn(void)
+{
+  struct proc *p = myproc();
+
+  // clear the ticks so that the alarm can fire again
+  p->alarm_ticks = 0;
+
+  // restore the original process's context
+  memmove(p->trapframe, &p->alarm_prev_frame, sizeof(p->alarm_prev_frame));
+
+  // clear out the previous trap frame for good measure
+  memset(&p->alarm_prev_frame, 0, sizeof(p->alarm_prev_frame));
+
+  // finally, since the return value of sigreturn will go to a0, return the
+  // original a0 from when the alarm fired.
+  return p->trapframe->a0;
+}
+
+uint64
 sys_backtrace(void)
 {
   backtrace();
