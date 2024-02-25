@@ -9,7 +9,7 @@
 #include "riscv.h"
 #include "defs.h"
 
-void freerange(void *pa_start, void *pa_end);
+void kunchecked_free(void *pa);
 
 extern char end[]; // first address after kernel.
                    // defined by kernel.ld.
@@ -24,44 +24,56 @@ struct {
   uint64 free_count;
 } kmem;
 
+uint page_refcounts[PHYSTOP / PGSIZE] = {};
+
 void
 kinit()
 {
   initlock(&kmem.lock, "kmem");
-  freerange(end, (void*)PHYSTOP);
+
+  for (uint64 p = PGROUNDUP((uint64)end); p + PGSIZE <= PHYSTOP; p += PGSIZE) {
+    kunchecked_free((void *)p);
+  }
 }
 
+// An "unchecked" free. It won't check alignment or refcounts, nor will it wipe the memory.
 void
-freerange(void *pa_start, void *pa_end)
+kunchecked_free(void *pa)
 {
-  char *p;
-  p = (char*)PGROUNDUP((uint64)pa_start);
-  for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE)
-    kfree(p);
+  // From now on we'll treat the entire page as a (incredibly wasteful) struct.
+  struct run *r = (struct run *)pa;
+
+  acquire(&kmem.lock);
+
+  r->next       = kmem.freelist;
+  kmem.freelist = r;
+  kmem.free_count++;
+
+  release(&kmem.lock);
 }
 
-// Free the page of physical memory pointed at by pa,
-// which normally should have been returned by a
-// call to kalloc().  (The exception is when
-// initializing the allocator; see kinit above.)
+// Free the page of physical memory pointed at by pa, which normally should have been returned by a
+// call to kalloc().
 void
 kfree(void *pa)
 {
-  struct run *r;
-
-  if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
+  if (((uint64)pa % PGSIZE) != 0 || (char *)pa < end || (uint64)pa >= PHYSTOP) {
     panic("kfree");
+  }
 
-  // Fill with junk to catch dangling refs.
-  memset(pa, 1, PGSIZE);
+  // Decrement the refcount, as the caller has indicated they no longer need it.
+  uint new_refcount = __sync_sub_and_fetch(&page_refcounts[(uint64)pa / PGSIZE], 1);
 
-  r = (struct run*)pa;
+  // Don't actually free the page, since other processes still have references to it.
+  if (new_refcount > 0) {
+    return;
+  }
 
-  acquire(&kmem.lock);
-  r->next = kmem.freelist;
-  kmem.freelist = r;
-  kmem.free_count++;
-  release(&kmem.lock);
+  // At this point, we know we can free the page. Fill it with junk to catch any dangling references
+  // to it.
+  memset(pa, '\xD', PGSIZE);
+
+  kunchecked_free(pa);
 }
 
 // Allocate one 4096-byte page of physical memory.
@@ -70,23 +82,70 @@ kfree(void *pa)
 void *
 kalloc(void)
 {
-  struct run *r;
-
   acquire(&kmem.lock);
-  r = kmem.freelist;
-  if (r) {
-    kmem.freelist = r->next;
-    kmem.free_count--;
+
+  struct run *r = kmem.freelist;
+
+  if (!r) {
+    // There is no free memory, so return early.
+    release(&kmem.lock);
+    return r;
   }
+
+  kmem.freelist = r->next;
+  kmem.free_count--;
+  page_refcounts[(uint64)r / PGSIZE] = 1;
+
   release(&kmem.lock);
 
-  if(r)
-    memset((char*)r, 5, PGSIZE); // fill with junk
+  // Fill with junk.
+  memset((char *)r, 5, PGSIZE);
+
   return (void*)r;
+}
+
+// Makes a copy of the given page if other pagetables have a reference to it, or returns the same
+// page if
+void *
+kcopyonwrite(const void *pa)
+{
+  if (((uint64)pa % PGSIZE) != 0 || (char *)pa < end || (uint64)pa >= PHYSTOP) {
+    panic("kcopyonwrite");
+  }
+
+  // Decrement the refcount, since we'll either use this page or make a copy.
+  uint new_refcount = __sync_sub_and_fetch(&page_refcounts[(uint64)pa / PGSIZE], 1);
+
+  // If there are no more references, we can reuse the page.
+  if (new_refcount == 0) {
+    // This is probably safe? No one else has a reference, so why would there be a race condition
+    // when setting the refcount for this page?
+    page_refcounts[(uint64)pa / PGSIZE] = 1;
+
+    return (void *)pa;
+  }
+
+  // We must allocate a new page, since there are still references to it.
+  void *new_pa = kalloc();
+
+  if (new_pa == 0) {
+    return new_pa;
+  }
+
+  // Copy the contents of the old page to the new page before returning the new page.
+  memmove(new_pa, pa, PGSIZE);
+
+  return new_pa;
 }
 
 uint64
 kgetfreemem(void)
 {
   return kmem.free_count * 4096;
+}
+
+void
+kincrementrefcount(void *pa)
+{
+  __sync_fetch_and_add(&page_refcounts[(uint64)pa / PGSIZE], 1);
 }

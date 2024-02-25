@@ -63,9 +63,11 @@ void            ramdiskrw(struct buf*);
 
 // kalloc.c
 void*           kalloc(void);
+void*           kcopyonwrite(const void *pa);
 void            kfree(void *);
 void            kinit(void);
 uint64          kgetfreemem(void);
+void            kincrementrefcount(void *pa);
 
 // log.c
 void            initlog(int, struct superblock*);
@@ -171,6 +173,7 @@ uint64          uvmalloc(pagetable_t, uint64, uint64, int);
 uint64          uvmdealloc(pagetable_t, uint64, uint64);
 int             uvmcopy(pagetable_t, pagetable_t, uint64);
 void            uvmfree(pagetable_t, uint64);
+pte_t *         uvmwalkcow(pagetable_t p, uint64 va, int *cow_result);
 void            uvmunmap(pagetable_t, uint64, uint64, int);
 void            uvmclear(pagetable_t, uint64);
 pte_t *         walk(pagetable_t, uint64, int);
