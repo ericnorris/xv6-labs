@@ -45,7 +45,7 @@ kvmmake(void)
 
   // allocate and map a kernel stack for each process.
   proc_mapstacks(kpgtbl);
-  
+
   return kpgtbl;
 }
 
@@ -154,7 +154,7 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
 
   if(size == 0)
     panic("mappages: size");
-  
+
   a = va;
   last = va + size - PGSIZE;
   for(;;){
@@ -196,6 +196,49 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
     }
     *pte = 0;
   }
+}
+
+// Return the address of the PTE in page table p that corresponds to the virtual address given. If
+// the PTE has the PTE_COW bit set, the page is copied and the PTE is remapped to a new physical
+// page.
+pte_t *
+uvmwalkcow(pagetable_t pagetable, uint64 va, int *cow_result)
+{
+  if ((va % PGSIZE) != 0) {
+    panic("uvmwalkcow: va not page-aligned");
+  }
+
+  pte_t *pte = walk(pagetable, va, 0);
+
+  if (pte == 0) {
+    return pte;
+  }
+
+  uint flags = PTE_FLAGS(*pte);
+
+  if (!(flags & PTE_COW)) {
+    return pte;
+  }
+
+  if (cow_result) {
+    *cow_result = 1;
+  }
+
+  uint64 old_pa = PTE2PA(*pte);
+  uint64 new_pa = (uint64)kcopyonwrite((const void *)old_pa);
+
+  if (new_pa == 0) {
+    return 0;
+  }
+
+  // clear the COW bit and make the page writeable since we've allocated a new page
+  flags &= ~PTE_COW;
+  flags |= PTE_W;
+
+  // remap the PTE with a new physical address and writable flags
+  *pte = PA2PTE(new_pa) | flags;
+
+  return pte;
 }
 
 // create an empty user page table.
@@ -312,26 +355,43 @@ uvmfree(pagetable_t pagetable, uint64 sz)
 int
 uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
 {
-  pte_t *pte;
-  uint64 pa, i;
-  uint flags;
-  char *mem;
+  uint64 i;
 
-  for(i = 0; i < sz; i += PGSIZE){
-    if((pte = walk(old, i, 0)) == 0)
+  for (i = 0; i < sz; i += PGSIZE) {
+    pte_t *pte;
+
+    if ((pte = walk(old, i, 0)) == 0) {
       panic("uvmcopy: pte should exist");
-    if((*pte & PTE_V) == 0)
+    }
+
+    if ((*pte & PTE_V) == 0) {
       panic("uvmcopy: page not present");
-    pa = PTE2PA(*pte);
-    flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
-      goto err;
-    memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
+    }
+
+    uint64 pa  = PTE2PA(*pte);
+    uint flags = PTE_FLAGS(*pte);
+
+    if (flags & PTE_W) {
+      // clear the PTE_W bit to trap any writes to this page
+      flags &= ~PTE_W;
+
+      // set the PTE_COW bit so we can know to allocate a new page
+      flags |= PTE_COW;
+
+      // overwrite the parent's page table entry with the modified flags
+      *pte = PA2PTE(pa) | flags;
+    }
+
+    // map the same phsyical page with the same flags in the child process - if the page was
+    // originally writeable, it will now have the COW bit set and we will allocate a new writeable
+    // page on demand
+    if (mappages(new, i, PGSIZE, pa, flags) != 0) {
       goto err;
     }
+
+    kincrementrefcount((void *)pa);
   }
+
   return 0;
 
  err:
@@ -345,7 +405,7 @@ void
 uvmclear(pagetable_t pagetable, uint64 va)
 {
   pte_t *pte;
-  
+
   pte = walk(pagetable, va, 0);
   if(pte == 0)
     panic("uvmclear");
@@ -363,13 +423,23 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 
   while(len > 0){
     va0 = PGROUNDDOWN(dstva);
-    if(va0 >= MAXVA)
+
+    if (va0 >= MAXVA) {
       return -1;
-    pte = walk(pagetable, va0, 0);
-    if(pte == 0 || (*pte & PTE_V) == 0 || (*pte & PTE_U) == 0 ||
-       (*pte & PTE_W) == 0)
+    }
+
+    pte = uvmwalkcow(pagetable, va0, 0);
+
+    if (pte == 0 || (*pte & PTE_V) == 0 || (*pte & PTE_U) == 0) {
       return -1;
+    }
+
     pa0 = PTE2PA(*pte);
+
+    if ((*pte & PTE_W) == 0) {
+      return -1;
+    }
+
     n = PGSIZE - (dstva - va0);
     if(n > len)
       n = len;
@@ -448,4 +518,38 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   } else {
     return -1;
   }
+}
+
+void
+vmprint_rec(pagetable_t pagetable, int indent)
+{
+  // there are 2^9 = 512 PTEs in a page table
+  for (int i = 0; i < 512; i++) {
+    pte_t pte = pagetable[i];
+    uint64 pa = PTE2PA(pte);
+
+    if (!(pte & PTE_V)) {
+      continue;
+    }
+
+    for (int j = 0; j < indent; j++) {
+      printf(" ..");
+    }
+
+    printf("%d: pte %p pa %p flags %x\n", i, pte, pa, PTE_FLAGS(pte));
+
+    if ((pte & (PTE_R | PTE_W | PTE_X | PTE_COW)) == 0) {
+      // this PTE points to a lower-level page table
+      vmprint_rec((pagetable_t)pa, indent + 1);
+    }
+  }
+}
+
+// Recursively print page-table pages.
+void
+vmprint(pagetable_t pagetable)
+{
+  printf("page table %p\n", pagetable);
+
+  vmprint_rec(pagetable, 1);
 }

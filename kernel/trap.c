@@ -36,26 +36,55 @@ trapinithart(void)
 void
 usertrap(void)
 {
-  int which_dev = 0;
-
-  if((r_sstatus() & SSTATUS_SPP) != 0)
+  if ((r_sstatus() & SSTATUS_SPP) != 0) {
     panic("usertrap: not from user mode");
+  }
 
-  // send interrupts and exceptions to kerneltrap(),
-  // since we're now in the kernel.
+  // send interrupts and exceptions to kerneltrap(), since we're now in the kernel
   w_stvec((uint64)kernelvec);
 
   struct proc *p = myproc();
-  
-  // save user program counter.
+
+  // save user program counter before we do anything else
   p->trapframe->epc = r_sepc();
-  
-  if(r_scause() == 8){
-    // system call
 
-    if(killed(p))
-      exit(-1);
+  int device_interrupt_type;
 
+  if ((device_interrupt_type = devintr())) {
+    // non-timer device interrupts are handled by devintr, so we can skip to userspace
+    if (device_interrupt_type != 2) {
+      goto userspace;
+    }
+
+    // if the process doesn't have an alarm interval set we should immediately yield
+    if (!p->alarm_interval) {
+      goto yield;
+    }
+
+    // the sigreturn syscall resets p->alarm_ticks, so if it's still equal to the alarm interval,
+    // we know the process has yet to call sigreturn
+    if (p->alarm_ticks == p->alarm_interval) {
+      goto yield;
+    }
+
+    if (++p->alarm_ticks < p->alarm_interval) {
+      goto yield;
+    }
+
+    // copy the trapframe before modifying it to call the alarm handler
+    memmove(&p->alarm_prev_frame, p->trapframe, sizeof(p->alarm_prev_frame));
+
+    // and swap the user program counter to the alarm handler address
+    p->trapframe->epc = (uint64)p->alarm_handler;
+
+  yield:
+    yield();
+
+    goto userspace;
+  }
+
+  switch (r_scause()) {
+  case SCAUSE_ECALL_UMODE:
     // sepc points to the ecall instruction,
     // but we want to return to the next instruction.
     p->trapframe->epc += 4;
@@ -65,20 +94,51 @@ usertrap(void)
     intr_on();
 
     syscall();
-  } else if((which_dev = devintr()) != 0){
-    // ok
-  } else {
+
+    break;
+
+  case SCAUSE_WRITE_PAGE_FAULT:
+    uint64 va      = r_stval();
+    uint64 va_page = PGROUNDDOWN(va);
+
+    if (va >= MAXVA) {
+      printf("usertrap(): invalid va pid=%d\n", p->pid);
+      printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
+      setkilled(p);
+      goto userspace;
+    }
+
+    int cow_result = 0;
+    pte_t *pte     = uvmwalkcow(p->pagetable, va_page, &cow_result);
+
+    if (pte == 0 && cow_result) {
+      printf("usertrap(): OOM during copy-on-write pid=%d\n", r_scause(), p->pid);
+      printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
+      setkilled(p);
+      goto userspace;
+    }
+
+    if (pte == 0 || !(PTE_FLAGS(*pte) & PTE_W)) {
+      printf("usertrap(): write page fault pid=%d\n", p->pid);
+      printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
+      setkilled(p);
+      goto userspace;
+    }
+
+    break;
+
+  default:
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     setkilled(p);
+    break;
   }
 
-  if(killed(p))
+userspace:
+  // the process may have been killed by another process calling kill() or setkilled() above
+  if (killed(p)) {
     exit(-1);
-
-  // give up the CPU if this is a timer interrupt.
-  if(which_dev == 2)
-    yield();
+  }
 
   usertrapret();
 }
@@ -109,7 +169,7 @@ usertrapret(void)
 
   // set up the registers that trampoline.S's sret will use
   // to get to user space.
-  
+
   // set S Previous Privilege mode to User.
   unsigned long x = r_sstatus();
   x &= ~SSTATUS_SPP; // clear SPP to 0 for user mode
@@ -122,7 +182,7 @@ usertrapret(void)
   // tell trampoline.S the user page table to switch to.
   uint64 satp = MAKE_SATP(p->pagetable);
 
-  // jump to userret in trampoline.S at the top of memory, which 
+  // jump to userret in trampoline.S at the top of memory, which
   // switches to the user page table, restores user registers,
   // and switches to user mode with sret.
   uint64 trampoline_userret = TRAMPOLINE + (userret - trampoline);
@@ -131,14 +191,14 @@ usertrapret(void)
 
 // interrupts and exceptions from kernel code go here via kernelvec,
 // on whatever the current kernel stack is.
-void 
+void
 kerneltrap()
 {
   int which_dev = 0;
   uint64 sepc = r_sepc();
   uint64 sstatus = r_sstatus();
   uint64 scause = r_scause();
-  
+
   if((sstatus & SSTATUS_SPP) == 0)
     panic("kerneltrap: not from supervisor mode");
   if(intr_get() != 0)
@@ -208,7 +268,7 @@ devintr()
     if(cpuid() == 0){
       clockintr();
     }
-    
+
     // acknowledge the software interrupt by clearing
     // the SSIP bit in sip.
     w_sip(r_sip() & ~2);

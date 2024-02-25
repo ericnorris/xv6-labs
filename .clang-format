@@ -1,0 +1,19 @@
+BasedOnStyle: LLVM
+
+IndentWidth: 2
+ColumnLimit: 120
+
+BreakBeforeBraces: Linux
+
+AlwaysBreakAfterReturnType:           AllDefinitions
+AlwaysBreakAfterDefinitionReturnType: All
+
+AllowShortLoopsOnASingleLine:  true
+AllowShortBlocksOnASingleLine: Empty
+
+AlignConsecutiveMacros:      Consecutive
+AlignConsecutiveAssignments: Consecutive
+AlignTrailingComments:       Always
+
+# TODO: sorting includes breaks compilation
+SortIncludes: Never
