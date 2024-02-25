@@ -200,6 +200,7 @@ UPROGS=\
 	$U/_bttest\
 	$U/_cowtest\
 	$U/_pgtbltest\
+	$U/_uthread\
 
 
 
@@ -214,10 +215,6 @@ UPROGS += \
 	$U/_lazytests
 endif
 
-ifeq ($(LAB),thread)
-UPROGS += \
-	$U/_uthread
-
 $U/uthread_switch.o : $U/uthread_switch.S
 	$(CC) $(CFLAGS) -c -o $U/uthread_switch.o $U/uthread_switch.S
 
@@ -230,7 +227,6 @@ ph: notxv6/ph.c
 
 barrier: notxv6/barrier.c
 	gcc -o barrier -g -O2 $(XCFLAGS) notxv6/barrier.c -pthread
-endif
 
 ifeq ($(LAB),lock)
 UPROGS += \
