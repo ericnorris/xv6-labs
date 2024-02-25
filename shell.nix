@@ -1,3 +1,5 @@
+#!/usr/bin/env nix-shell
+
 # see https://ayats.org/blog/nix-cross/
 let
   pkgs  = import <nixpkgs> {};
