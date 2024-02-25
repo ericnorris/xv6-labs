@@ -196,6 +196,10 @@ UPROGS=\
 	$U/_wc\
 	$U/_xargs\
 	$U/_zombie\
+	$U/_call\
+	$U/_bttest\
+	$U/_cowtest\
+	$U/_pgtbltest\
 
 
 
@@ -205,20 +209,9 @@ UPROGS += \
 	$U/_stats
 endif
 
-ifeq ($(LAB),traps)
-UPROGS += \
-	$U/_call\
-	$U/_bttest
-endif
-
 ifeq ($(LAB),lazy)
 UPROGS += \
 	$U/_lazytests
-endif
-
-ifeq ($(LAB),cow)
-UPROGS += \
-	$U/_cowtest
 endif
 
 ifeq ($(LAB),thread)
@@ -239,11 +232,6 @@ barrier: notxv6/barrier.c
 	gcc -o barrier -g -O2 $(XCFLAGS) notxv6/barrier.c -pthread
 endif
 
-ifeq ($(LAB),pgtbl)
-UPROGS += \
-	$U/_pgtbltest
-endif
-
 ifeq ($(LAB),lock)
 UPROGS += \
 	$U/_kalloctest\
@@ -255,21 +243,13 @@ UPROGS += \
 	$U/_bigfile
 endif
 
-
-
 ifeq ($(LAB),net)
 UPROGS += \
 	$U/_nettests
 endif
 
-UEXTRA=
-ifeq ($(LAB),util)
-	UEXTRA += user/xargstest.sh
-endif
-
-
-fs.img: mkfs/mkfs README README-original $(UEXTRA) $(UPROGS)
-	mkfs/mkfs fs.img README README-original $(UEXTRA) $(UPROGS)
+fs.img: mkfs/mkfs README README-original user/xargstest.sh $(UPROGS)
+	mkfs/mkfs fs.img README README-original user/xargstest.sh $(UPROGS)
 
 -include kernel/*.d user/*.d
 
