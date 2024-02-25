@@ -11,9 +11,10 @@ AlwaysBreakAfterDefinitionReturnType: All
 AllowShortLoopsOnASingleLine:  true
 AllowShortBlocksOnASingleLine: Empty
 
-AlignConsecutiveMacros:      Consecutive
-AlignConsecutiveAssignments: Consecutive
-AlignTrailingComments:       Always
+AlignConsecutiveDeclarations: Consecutive
+AlignConsecutiveMacros:       Consecutive
+AlignConsecutiveAssignments:  Consecutive
+AlignTrailingComments:        Always
 
 # TODO: sorting includes breaks compilation
 SortIncludes: Never
