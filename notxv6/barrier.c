@@ -9,9 +9,10 @@ static int round = 0;
 
 struct barrier {
   pthread_mutex_t barrier_mutex;
-  pthread_cond_t barrier_cond;
-  int nthread;      // Number of threads that have reached this round of the barrier
-  int round;     // Barrier round
+  pthread_cond_t  barrier_cond;
+
+  int nthread; // Number of threads that have reached this round of the barrier
+  int round;   // Barrier round
 } bstate;
 
 static void
@@ -22,15 +23,31 @@ barrier_init(void)
   bstate.nthread = 0;
 }
 
-static void 
+static void
 barrier()
 {
-  // YOUR CODE HERE
-  //
-  // Block until all threads have called barrier() and
-  // then increment bstate.round.
-  //
-  
+  // Grab the lock before we modify bstate.nthread, since that is contentious
+  pthread_mutex_lock(&bstate.barrier_mutex);
+
+  bstate.nthread++;
+
+  // we're not the last thread to reach the lock, so we'll wait until the last thread does
+  if (bstate.nthread != nthread) {
+    pthread_cond_wait(&bstate.barrier_cond, &bstate.barrier_mutex);
+
+    // we immediately unlock and return, since the last thread was responsible for starting the
+    // new round
+    pthread_mutex_unlock(&bstate.barrier_mutex);
+    return;
+  }
+
+  // we're the last thread to have acquired the lock, so it is our responsibility to start a new
+  // round and to wake everyone up
+  bstate.round++;
+  bstate.nthread = 0;
+
+  pthread_cond_broadcast(&bstate.barrier_cond);
+  pthread_mutex_unlock(&bstate.barrier_mutex);
 }
 
 static void *
