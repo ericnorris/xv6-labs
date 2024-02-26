@@ -1,4 +1,5 @@
 struct stat;
+struct sysinfo;
 
 // system calls
 int fork(void);
@@ -22,14 +23,13 @@ int getpid(void);
 char* sbrk(int);
 int sleep(int);
 int uptime(void);
-#ifdef LAB_NET
+int trace(int);
+int sysinfo(struct sysinfo *);
 int connect(uint32, uint16, uint16);
-#endif
-#ifdef LAB_PGTBL
 int pgaccess(void *base, int len, void *mask);
-// usyscall region
-int ugetpid(void);
-#endif
+int sigalarm(int ticks, void (*handler)());
+int sigreturn(void);
+int backtrace(void);
 
 // ulib.c
 int stat(const char*, struct stat*);
@@ -48,3 +48,4 @@ int atoi(const char*);
 int memcmp(const void *, const void *, uint);
 void *memcpy(void *, const void *, uint);
 int statistics(void*, int);
+int ugetpid(void);

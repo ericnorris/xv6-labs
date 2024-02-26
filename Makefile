@@ -62,7 +62,7 @@ endif
 
 # riscv64-unknown-elf- or riscv64-linux-gnu-
 # perhaps in /opt/riscv/bin
-#TOOLPREFIX = 
+#TOOLPREFIX =
 
 # Try to infer the correct TOOLPREFIX if not set
 ifndef TOOLPREFIX
@@ -172,8 +172,10 @@ mkfs/mkfs: mkfs/mkfs.c $K/fs.h $K/param.h
 .PRECIOUS: %.o
 
 UPROGS=\
+	$U/_alarmtest\
 	$U/_cat\
 	$U/_echo\
+	$U/_find\
 	$U/_forktest\
 	$U/_grep\
 	$U/_init\
@@ -181,13 +183,24 @@ UPROGS=\
 	$U/_ln\
 	$U/_ls\
 	$U/_mkdir\
+	$U/_pingpong\
+	$U/_primes\
 	$U/_rm\
 	$U/_sh\
+	$U/_sleep\
 	$U/_stressfs\
+	$U/_sysinfotest\
+	$U/_trace\
 	$U/_usertests\
 	$U/_grind\
 	$U/_wc\
+	$U/_xargs\
 	$U/_zombie\
+	$U/_call\
+	$U/_bttest\
+	$U/_cowtest\
+	$U/_pgtbltest\
+	$U/_uthread\
 
 
 
@@ -197,25 +210,10 @@ UPROGS += \
 	$U/_stats
 endif
 
-ifeq ($(LAB),traps)
-UPROGS += \
-	$U/_call\
-	$U/_bttest
-endif
-
 ifeq ($(LAB),lazy)
 UPROGS += \
 	$U/_lazytests
 endif
-
-ifeq ($(LAB),cow)
-UPROGS += \
-	$U/_cowtest
-endif
-
-ifeq ($(LAB),thread)
-UPROGS += \
-	$U/_uthread
 
 $U/uthread_switch.o : $U/uthread_switch.S
 	$(CC) $(CFLAGS) -c -o $U/uthread_switch.o $U/uthread_switch.S
@@ -229,12 +227,6 @@ ph: notxv6/ph.c
 
 barrier: notxv6/barrier.c
 	gcc -o barrier -g -O2 $(XCFLAGS) notxv6/barrier.c -pthread
-endif
-
-ifeq ($(LAB),pgtbl)
-UPROGS += \
-	$U/_pgtbltest
-endif
 
 ifeq ($(LAB),lock)
 UPROGS += \
@@ -247,21 +239,13 @@ UPROGS += \
 	$U/_bigfile
 endif
 
-
-
 ifeq ($(LAB),net)
 UPROGS += \
 	$U/_nettests
 endif
 
-UEXTRA=
-ifeq ($(LAB),util)
-	UEXTRA += user/xargstest.sh
-endif
-
-
-fs.img: mkfs/mkfs README $(UEXTRA) $(UPROGS)
-	mkfs/mkfs fs.img README $(UEXTRA) $(UPROGS)
+fs.img: mkfs/mkfs README README-original user/xargstest.sh $(UPROGS)
+	mkfs/mkfs fs.img README README-original user/xargstest.sh $(UPROGS)
 
 -include kernel/*.d user/*.d
 

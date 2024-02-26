@@ -6,8 +6,8 @@
 // 00001000 -- boot ROM, provided by qemu
 // 02000000 -- CLINT
 // 0C000000 -- PLIC
-// 10000000 -- uart0 
-// 10001000 -- virtio disk 
+// 10000000 -- uart0
+// 10001000 -- virtio disk
 // 80000000 -- boot ROM jumps here in machine mode
 //             -kernel loads the kernel here
 // unused RAM after 80000000.
@@ -70,10 +70,16 @@
 //   TRAPFRAME (p->trapframe, used by the trampoline)
 //   TRAMPOLINE (the same page as in the kernel)
 #define TRAPFRAME (TRAMPOLINE - PGSIZE)
-#ifdef LAB_PGTBL
 #define USYSCALL (TRAPFRAME - PGSIZE)
+
+// This header file is included by trampoline.s, and originally relied
+// (potentially inadvertently) on the fact that LAB_PGTBL was not defined. I
+// think it's more explicit to hide the non-assembly stuff with this check
+// instead.
+#ifndef __ASSEMBLER__
 
 struct usyscall {
   int pid;  // Process ID
 };
+
 #endif
