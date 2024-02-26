@@ -196,6 +196,11 @@ UPROGS=\
 	$U/_wc\
 	$U/_xargs\
 	$U/_zombie\
+	$U/_call\
+	$U/_bttest\
+	$U/_cowtest\
+	$U/_pgtbltest\
+	$U/_uthread\
 
 
 
@@ -205,25 +210,10 @@ UPROGS += \
 	$U/_stats
 endif
 
-ifeq ($(LAB),traps)
-UPROGS += \
-	$U/_call\
-	$U/_bttest
-endif
-
 ifeq ($(LAB),lazy)
 UPROGS += \
 	$U/_lazytests
 endif
-
-ifeq ($(LAB),cow)
-UPROGS += \
-	$U/_cowtest
-endif
-
-ifeq ($(LAB),thread)
-UPROGS += \
-	$U/_uthread
 
 $U/uthread_switch.o : $U/uthread_switch.S
 	$(CC) $(CFLAGS) -c -o $U/uthread_switch.o $U/uthread_switch.S
@@ -237,12 +227,6 @@ ph: notxv6/ph.c
 
 barrier: notxv6/barrier.c
 	gcc -o barrier -g -O2 $(XCFLAGS) notxv6/barrier.c -pthread
-endif
-
-ifeq ($(LAB),pgtbl)
-UPROGS += \
-	$U/_pgtbltest
-endif
 
 ifeq ($(LAB),lock)
 UPROGS += \
@@ -255,32 +239,22 @@ UPROGS += \
 	$U/_bigfile
 endif
 
-
-
 ifeq ($(LAB),net)
 UPROGS += \
 	$U/_nettests
 endif
 
-UEXTRA=
-ifeq ($(LAB),util)
-	UEXTRA += user/xargstest.sh
-endif
-
-
-fs.img: mkfs/mkfs README README-original $(UEXTRA) $(UPROGS)
-	mkfs/mkfs fs.img README README-original $(UEXTRA) $(UPROGS)
+fs.img: mkfs/mkfs README README-original user/xargstest.sh $(UPROGS)
+	mkfs/mkfs fs.img README README-original user/xargstest.sh $(UPROGS)
 
 -include kernel/*.d user/*.d
 
 clean:
-	rm -f *.tex *.dvi *.idx *.aux *.log *.ind *.ilg \
+	rm -rf *.tex *.dvi *.idx *.aux *.log *.ind *.ilg *.dSYM *.zip \
 	*/*.o */*.d */*.asm */*.sym \
-	$U/initcode $U/initcode.out $K/kernel fs.img \
-	mkfs/mkfs .gdbinit \
-        $U/usys.S \
-	$(UPROGS) \
-	*.zip \
+	$U/initcode $U/initcode.out $U/usys.S $U/_* \
+	$K/kernel \
+	mkfs/mkfs fs.img .gdbinit __pycache__ xv6.out* \
 	ph barrier
 
 # try to generate a unique GDB port
