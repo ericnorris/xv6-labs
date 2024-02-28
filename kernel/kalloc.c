@@ -9,7 +9,7 @@
 #include "riscv.h"
 #include "defs.h"
 
-void kunchecked_free(void *pa);
+void kunchecked_free(uint cpu_core, void *pa);
 
 extern char end[]; // first address after kernel.
                    // defined by kernel.ld.
@@ -18,38 +18,47 @@ struct run {
   struct run *next;
 };
 
-struct {
+struct cpu_mem {
   struct spinlock lock;
   struct run *freelist;
   uint64 free_count;
-} kmem;
+} kmem[NCPU] = {};
 
 uint page_refcounts[PHYSTOP / PGSIZE] = {};
 
 void
 kinit()
 {
-  initlock(&kmem.lock, "kmem");
+  char lock_name[16];
+
+  for (int i = 0; i < NCPU; i++) {
+    snprintf(lock_name, sizeof(lock_name), "kmem_%d", i);
+    initlock(&kmem[i].lock, lock_name);
+  }
 
   for (uint64 p = PGROUNDUP((uint64)end); p + PGSIZE <= PHYSTOP; p += PGSIZE) {
-    kunchecked_free((void *)p);
+    // for simplicity's sake, give all free pages to the first CPU
+    kunchecked_free(0, (void *)p);
   }
 }
 
 // An "unchecked" free. It won't check alignment or refcounts, nor will it wipe the memory.
 void
-kunchecked_free(void *pa)
+kunchecked_free(uint cpu_core, void *pa)
 {
   // From now on we'll treat the entire page as a (incredibly wasteful) struct.
   struct run *r = (struct run *)pa;
 
-  acquire(&kmem.lock);
+  struct cpu_mem *cpu_mem = &kmem[cpu_core];
 
-  r->next       = kmem.freelist;
-  kmem.freelist = r;
-  kmem.free_count++;
+  acquire(&cpu_mem->lock);
 
-  release(&kmem.lock);
+  r->next = cpu_mem->freelist;
+
+  cpu_mem->freelist = r;
+  cpu_mem->free_count++;
+
+  release(&cpu_mem->lock);
 }
 
 // Free the page of physical memory pointed at by pa, which normally should have been returned by a
@@ -73,7 +82,11 @@ kfree(void *pa)
   // to it.
   memset(pa, '\xD', PGSIZE);
 
-  kunchecked_free(pa);
+  push_off();
+
+  kunchecked_free(cpuid(), pa);
+
+  pop_off();
 }
 
 // Allocate one 4096-byte page of physical memory.
@@ -82,26 +95,45 @@ kfree(void *pa)
 void *
 kalloc(void)
 {
-  acquire(&kmem.lock);
+  push_off();
 
-  struct run *r = kmem.freelist;
+  int my_cpuid = cpuid();
+  int i        = my_cpuid;
 
-  if (!r) {
-    // There is no free memory, so return early.
-    release(&kmem.lock);
-    return r;
-  }
+  do {
+    struct cpu_mem *cpu_mem = &kmem[i];
 
-  kmem.freelist = r->next;
-  kmem.free_count--;
-  page_refcounts[(uint64)r / PGSIZE] = 1;
+    acquire(&cpu_mem->lock);
 
-  release(&kmem.lock);
+    struct run *freelist = cpu_mem->freelist;
 
-  // Fill with junk.
-  memset((char *)r, 5, PGSIZE);
+    if (!freelist) {
+      release(&cpu_mem->lock);
 
-  return (void*)r;
+      // try the next CPU
+      i = (i + 1 == NCPU) ? 0 : i + 1;
+
+      continue;
+    }
+
+    cpu_mem->freelist = freelist->next;
+    cpu_mem->free_count--;
+
+    page_refcounts[(uint64)freelist / PGSIZE] = 1;
+
+    release(&cpu_mem->lock);
+    pop_off();
+
+    // Fill with junk.
+    memset((char *)freelist, 5, PGSIZE);
+
+    return (void *)freelist;
+  } while (i != my_cpuid);
+
+  pop_off();
+
+  // no CPUs had free memory
+  return 0;
 }
 
 // Makes a copy of the given page if other pagetables have a reference to it, or returns the same
@@ -141,7 +173,13 @@ kcopyonwrite(const void *pa)
 uint64
 kgetfreemem(void)
 {
-  return kmem.free_count * 4096;
+  uint64 total = 0;
+
+  for (int i = 0; i < NCPU; i++) {
+    total += kmem[i].free_count;
+  }
+
+  return total * 4096;
 }
 
 void
