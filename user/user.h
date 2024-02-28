@@ -25,6 +25,7 @@ int sleep(int);
 int uptime(void);
 int trace(int);
 int sysinfo(struct sysinfo *);
+int connect(uint32, uint16, uint16);
 int pgaccess(void *base, int len, void *mask);
 int sigalarm(int ticks, void (*handler)());
 int sigreturn(void);
