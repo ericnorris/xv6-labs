@@ -53,9 +53,9 @@ static struct disk {
   // disk command headers.
   // one-for-one with descriptors, for convenience.
   struct virtio_blk_req ops[NUM];
-  
+
   struct spinlock vdisk_lock;
-  
+
 } disk;
 
 void
@@ -71,7 +71,7 @@ virtio_disk_init(void)
      *R(VIRTIO_MMIO_VENDOR_ID) != 0x554d4551){
     panic("could not find virtio disk");
   }
-  
+
   // reset device
   *R(VIRTIO_MMIO_STATUS) = status;
 
@@ -212,7 +212,6 @@ alloc3_desc(int *idx)
   return 0;
 }
 
-#ifdef LAB_LOCK
 //
 // check that there are at most NBUF distinct
 // struct buf's, which the lock lab requires.
@@ -232,7 +231,6 @@ checkbuf(struct buf *b)
   }
   panic("more than NBUF bufs");
 }
-#endif
 
 void
 virtio_disk_rw(struct buf *b, int write)
@@ -241,9 +239,7 @@ virtio_disk_rw(struct buf *b, int write)
 
   acquire(&disk.vdisk_lock);
 
-#ifdef LAB_LOCK
   checkbuf(b);
-#endif
 
   // the spec's Section 5.2 says that legacy block operations use
   // three descriptors: one for type/reserved/sector, one for the

@@ -19,7 +19,7 @@ static struct {
 
 int statscopyin(char*, int);
 int statslock(char*, int);
-  
+
 int
 statswrite(int user_src, uint64 src, int n)
 {
@@ -37,9 +37,7 @@ statsread(int user_dst, uint64 dst, int n)
 #ifdef LAB_PGTBL
     stats.sz = statscopyin(stats.buf, BUFSZ);
 #endif
-#ifdef LAB_LOCK
     stats.sz = statslock(stats.buf, BUFSZ);
-#endif
   }
   m = stats.sz - stats.off;
 

@@ -34,7 +34,9 @@ OBJS = \
 	$K/e1000.o \
 	$K/net.o \
 	$K/sysnet.o \
-	$K/pci.o
+	$K/pci.o \
+	$K/stats.o\
+	$K/sprintf.o
 
 OBJS_KCSAN = \
   $K/start.o \
@@ -47,13 +49,6 @@ ifdef KCSAN
 OBJS_KCSAN += \
 	$K/kcsan.o
 endif
-
-ifeq ($(LAB),$(filter $(LAB), lock))
-OBJS += \
-	$K/stats.o\
-	$K/sprintf.o
-endif
-
 
 # riscv64-unknown-elf- or riscv64-linux-gnu-
 # perhaps in /opt/riscv/bin
@@ -131,11 +126,7 @@ $U/initcode: $U/initcode.S
 tags: $(OBJS) _init
 	etags *.S *.c
 
-ULIB = $U/ulib.o $U/usys.o $U/printf.o $U/umalloc.o
-
-ifeq ($(LAB),$(filter $(LAB), lock))
-ULIB += $U/statistics.o
-endif
+ULIB = $U/ulib.o $U/usys.o $U/printf.o $U/umalloc.o $U/statistics.o
 
 _%: %.o $(ULIB)
 	$(LD) $(LDFLAGS) -T $U/user.ld -o $@ $^
@@ -194,14 +185,11 @@ UPROGS=\
 	$U/_pgtbltest\
 	$U/_uthread\
 	$U/_nettests\
+	$U/_stats \
+	$U/_kalloctest\
+	$U/_bcachetest
 
 
-
-
-ifeq ($(LAB),$(filter $(LAB), lock))
-UPROGS += \
-	$U/_stats
-endif
 
 ifeq ($(LAB),lazy)
 UPROGS += \
@@ -220,12 +208,6 @@ ph: notxv6/ph.c
 
 barrier: notxv6/barrier.c
 	gcc -o barrier -g -O2 $(XCFLAGS) notxv6/barrier.c -pthread
-
-ifeq ($(LAB),lock)
-UPROGS += \
-	$U/_kalloctest\
-	$U/_bcachetest
-endif
 
 ifeq ($(LAB),fs)
 UPROGS += \
