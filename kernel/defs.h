@@ -1,7 +1,5 @@
-#ifdef LAB_MMAP
-typedef unsigned long size_t;
-typedef long int off_t;
-#endif
+// clang-format off
+
 struct buf;
 struct context;
 struct file;
@@ -12,10 +10,9 @@ struct spinlock;
 struct sleeplock;
 struct stat;
 struct superblock;
-#ifdef LAB_NET
 struct mbuf;
 struct sock;
-#endif
+
 
 // bio.c
 void            binit(void);
@@ -69,8 +66,11 @@ void            ramdiskrw(struct buf*);
 
 // kalloc.c
 void*           kalloc(void);
+void*           kcopyonwrite(const void *pa);
 void            kfree(void *);
 void            kinit(void);
+uint64          kgetfreemem(void);
+void            kincrementrefcount(void *pa);
 
 // log.c
 void            initlog(int, struct superblock*);
@@ -88,6 +88,7 @@ int             pipewrite(struct pipe*, uint64, int);
 void            printf(char*, ...);
 void            panic(char*) __attribute__((noreturn));
 void            printfinit(void);
+void            backtrace(void);
 
 // proc.c
 int             cpuid(void);
@@ -114,6 +115,7 @@ void            yield(void);
 int             either_copyout(int user_dst, uint64 dst, void *src, uint64 len);
 int             either_copyin(void *dst, int user_src, uint64 src, uint64 len);
 void            procdump(void);
+uint            proccount(void);
 
 // swtch.S
 void            swtch(struct context*, struct context*);
@@ -125,9 +127,7 @@ void            initlock(struct spinlock*, char*);
 void            release(struct spinlock*);
 void            push_off(void);
 void            pop_off(void);
-#if defined(LAB_LOCK) || defined(LAB_NET)
 int             atomic_read4(int *addr);
-#endif
 #ifdef LAB_LOCK
 void            freelock(struct spinlock*);
 #endif
@@ -180,6 +180,7 @@ uint64          uvmalloc(pagetable_t, uint64, uint64, int);
 uint64          uvmdealloc(pagetable_t, uint64, uint64);
 int             uvmcopy(pagetable_t, pagetable_t, uint64);
 void            uvmfree(pagetable_t, uint64);
+pte_t *         uvmwalkcow(pagetable_t p, uint64 va, int *cow_result);
 void            uvmunmap(pagetable_t, uint64, uint64, int);
 void            uvmclear(pagetable_t, uint64);
 pte_t *         walk(pagetable_t, uint64, int);
@@ -187,6 +188,7 @@ uint64          walkaddr(pagetable_t, uint64);
 int             copyout(pagetable_t, uint64, char *, uint64);
 int             copyin(pagetable_t, char *, uint64, uint64);
 int             copyinstr(pagetable_t, char *, uint64, uint64);
+void            vmprint(pagetable_t);
 
 // plic.c
 void            plicinit(void);
@@ -210,20 +212,17 @@ int             copyin_new(pagetable_t, char *, uint64, uint64);
 int             copyinstr_new(pagetable_t, char *, uint64, uint64);
 #endif
 
-#ifdef LAB_LOCK
 // stats.c
 void            statsinit(void);
 void            statsinc(void);
 
 // sprintf.c
 int             snprintf(char*, int, char*, ...);
-#endif
 
 #ifdef KCSAN
 void            kcsaninit();
 #endif
 
-#ifdef LAB_NET
 // pci.c
 void            pci_init();
 
@@ -243,4 +242,3 @@ void            sockclose(struct sock *);
 int             sockread(struct sock *, uint64, int);
 int             sockwrite(struct sock *, uint64, int);
 void            sockrecvudp(struct mbuf*, uint32, uint16, uint16);
-#endif
