@@ -7,19 +7,38 @@
 #include "defs.h"
 #include "e1000_dev.h"
 #include "net.h"
+#include <stddef.h>
+
+// === transmit data structures ===
 
 #define TX_RING_SIZE 16
+
+// the transmit descriptor ring buffer, see 3.4
 static struct tx_desc tx_ring[TX_RING_SIZE] __attribute__((aligned(16)));
+
+// an array of in-flight mbuf structs, one per tx_desc in the tx_ring
 static struct mbuf *tx_mbufs[TX_RING_SIZE];
 
+// a spinlock that guards access to the tx_ring and E1000_TDT register
+struct spinlock e1000_tx_lock;
+
+// === receive data structures ===
+
 #define RX_RING_SIZE 16
+
+// the receive descriptor ring buffer, see 3.2.6
 static struct rx_desc rx_ring[RX_RING_SIZE] __attribute__((aligned(16)));
+
+// an array of pending mbuf structs, one per rx_desc in the rx_ring
 static struct mbuf *rx_mbufs[RX_RING_SIZE];
+
+// a spinlock that guards access to the rx_ring and E1000_RDT register
+struct spinlock e1000_rx_lock;
+
+// === end ===
 
 // remember where the e1000's registers live.
 static volatile uint32 *regs;
-
-struct spinlock e1000_lock;
 
 // called by pci_init().
 // xregs is the memory address at which the
@@ -29,7 +48,8 @@ e1000_init(uint32 *xregs)
 {
   int i;
 
-  initlock(&e1000_lock, "e1000");
+  initlock(&e1000_tx_lock, "e1000_tx");
+  initlock(&e1000_rx_lock, "e1000_rx");
 
   regs = xregs;
 
@@ -50,7 +70,7 @@ e1000_init(uint32 *xregs)
     panic("e1000");
   regs[E1000_TDLEN] = sizeof(tx_ring);
   regs[E1000_TDH] = regs[E1000_TDT] = 0;
-  
+
   // [E1000 14.4] Receive initialization
   memset(rx_ring, 0, sizeof(rx_ring));
   for (i = 0; i < RX_RING_SIZE; i++) {
@@ -85,7 +105,7 @@ e1000_init(uint32 *xregs)
     E1000_RCTL_BAM |                 // enable broadcast
     E1000_RCTL_SZ_2048 |             // 2048-byte rx buffers
     E1000_RCTL_SECRC;                // strip CRC
-  
+
   // ask e1000 for receive interrupts.
   regs[E1000_RDTR] = 0; // interrupt after every received packet (no timer)
   regs[E1000_RADV] = 0; // interrupt after every packet (no timer)
@@ -95,26 +115,84 @@ e1000_init(uint32 *xregs)
 int
 e1000_transmit(struct mbuf *m)
 {
-  //
-  // Your code here.
-  //
-  // the mbuf contains an ethernet frame; program it into
-  // the TX descriptor ring so that the e1000 sends it. Stash
-  // a pointer so that it can be freed after sending.
-  //
-  
+  acquire(&e1000_tx_lock);
+
+  // the index of the next available transmit descriptor
+  int tx_index = regs[E1000_TDT];
+
+  // the next available transmit descriptor
+  struct tx_desc *tx_desc = &tx_ring[tx_index];
+
+  // E1000_TXD_STAT_DD ("descriptor done") is set when the transmit descriptor has been sent, and
+  // if that's not set, the ring has overflowed - we've looped back to a packet in the ring that
+  // has not yet been sent
+  if ((tx_desc->status & E1000_TXD_STAT_DD) == 0) {
+    printf("e1000_transmit overflow: transmit not yet complete for tx_desc #%d", tx_index);
+    release(&e1000_tx_lock);
+
+    return -1;
+  }
+
+  // free the mbuf associated with the last sent packet, if there was one
+  if (tx_mbufs[tx_index]) {
+    mbuffree(tx_mbufs[tx_index]);
+  }
+
+  tx_mbufs[tx_index] = m;
+
+  tx_desc->addr    = (uint64)m->head;
+  tx_desc->length  = m->len;
+  tx_desc->cmd    |= E1000_TXD_CMD_RS | E1000_TXD_CMD_EOP;
+
+  regs[E1000_TDT] = (tx_index + 1 == TX_RING_SIZE) ? 0 : tx_index + 1;
+
+  release(&e1000_tx_lock);
+
   return 0;
 }
 
 static void
 e1000_recv(void)
 {
-  //
-  // Your code here.
-  //
-  // Check for packets that have arrived from the e1000
-  // Create and deliver an mbuf for each packet (using net_rx()).
-  //
+  acquire(&e1000_rx_lock);
+
+  // the index of the last processed rx_desc in the ring
+  int rx_index = regs[E1000_RDT];
+
+  while (1) {
+    // move on to the next entry in the ring, which may wrap around to 0
+    if (++rx_index == RX_RING_SIZE) {
+      rx_index = 0;
+    }
+
+    struct rx_desc *rx_desc = &rx_ring[rx_index];
+    struct mbuf    *rx_mbuf = rx_mbufs[rx_index];
+
+    // check to see if the e1000 card has put anything in this rx_desc
+    if ((rx_desc->status & E1000_RXD_STAT_DD) == 0) {
+      break;
+    }
+
+    // set the length of the mbuf to the length of the received packet
+    rx_mbuf->len = rx_desc->length;
+
+    // and then pass it off to the rest of the networking stack
+    net_rx(rx_mbuf);
+
+    // allocate a new mbuf for this rx_desc since we've handed off the last one
+    if (!(rx_mbufs[rx_index] = mbufalloc(0))) {
+      panic("e1000_recv");
+    }
+
+    // point the rx_desc to this new mbuf and clear the status field so the e1000 can set it
+    rx_desc->addr   = (uint64)rx_mbufs[rx_index]->head;
+    rx_desc->status = 0;
+
+    // mark our progress in the ring buffer
+    regs[E1000_RDT] = rx_index;
+  }
+
+  release(&e1000_rx_lock);
 }
 
 void

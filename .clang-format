@@ -13,8 +13,11 @@ AllowShortBlocksOnASingleLine: Empty
 
 AlignConsecutiveDeclarations: Consecutive
 AlignConsecutiveMacros:       Consecutive
-AlignConsecutiveAssignments:  Consecutive
 AlignTrailingComments:        Always
+
+AlignConsecutiveAssignments:
+  Enabled:       true
+  AlignCompound: true
 
 # TODO: sorting includes breaks compilation
 SortIncludes: Never

@@ -23,7 +23,7 @@ char *mbuftrim(struct mbuf *m, unsigned int len);
 // [-headroom-][------buffer------][-tailroom-]
 // |----------------MBUF_SIZE-----------------|
 //
-// These marcos automatically typecast and determine the size of header structs.
+// These macros automatically typecast and determine the size of header structs.
 // In most situations you should use these instead of the raw ops above.
 #define mbufpullhdr(mbuf, hdr) (typeof(hdr)*)mbufpull(mbuf, sizeof(hdr))
 #define mbufpushhdr(mbuf, hdr) (typeof(hdr)*)mbufpush(mbuf, sizeof(hdr))
@@ -143,14 +143,14 @@ struct dns {
   uint8 rd: 1;  // recursion desired
   uint8 tc: 1;  // truncated
   uint8 aa: 1;  // authoritive
-  uint8 opcode: 4; 
+  uint8 opcode: 4;
   uint8 qr: 1;  // query/response
   uint8 rcode: 4; // response code
   uint8 cd: 1;  // checking disabled
   uint8 ad: 1;  // authenticated data
-  uint8 z:  1;  
+  uint8 z:  1;
   uint8 ra: 1;  // recursion available
-  
+
   uint16 qdcount; // number of question entries
   uint16 ancount; // number of resource records in answer section
   uint16 nscount; // number of NS resource records in authority section
@@ -161,7 +161,7 @@ struct dns_question {
   uint16 qtype;
   uint16 qclass;
 } __attribute__((packed));
-  
+
 #define ARECORD (0x0001)
 #define QCLASS  (0x0001)
 
