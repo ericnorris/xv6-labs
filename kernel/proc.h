@@ -104,4 +104,12 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+  int trace_mask;              // Mask for tracing syscalls
+  struct usyscall *usyscall;   // read-only data page for userspace sytem calls
+
+  // still private, alarm-only fields
+  uint alarm_interval;               // interval requested by the process's sigalarm() call
+  void (*alarm_handler)();           // pointer to process's sigalarm handler
+  uint alarm_ticks;                  // number of ticks since last alarm
+  struct trapframe alarm_prev_frame; // the trapframe before the handler was called
 };

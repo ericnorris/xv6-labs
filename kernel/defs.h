@@ -1,3 +1,5 @@
+// clang-format off
+
 struct buf;
 struct context;
 struct file;
@@ -8,6 +10,9 @@ struct spinlock;
 struct sleeplock;
 struct stat;
 struct superblock;
+struct mbuf;
+struct sock;
+
 
 // bio.c
 void            binit(void);
@@ -61,8 +66,11 @@ void            ramdiskrw(struct buf*);
 
 // kalloc.c
 void*           kalloc(void);
+void*           kcopyonwrite(const void *pa);
 void            kfree(void *);
 void            kinit(void);
+uint64          kgetfreemem(void);
+void            kincrementrefcount(void *pa);
 
 // log.c
 void            initlog(int, struct superblock*);
@@ -80,6 +88,7 @@ int             pipewrite(struct pipe*, uint64, int);
 void            printf(char*, ...);
 void            panic(char*) __attribute__((noreturn));
 void            printfinit(void);
+void            backtrace(void);
 
 // proc.c
 int             cpuid(void);
@@ -106,6 +115,7 @@ void            yield(void);
 int             either_copyout(int user_dst, uint64 dst, void *src, uint64 len);
 int             either_copyin(void *dst, int user_src, uint64 src, uint64 len);
 void            procdump(void);
+uint            proccount(void);
 
 // swtch.S
 void            swtch(struct context*, struct context*);
@@ -117,6 +127,8 @@ void            initlock(struct spinlock*, char*);
 void            release(struct spinlock*);
 void            push_off(void);
 void            pop_off(void);
+int             atomic_read4(int *addr);
+void            freelock(struct spinlock*);
 
 // sleeplock.c
 void            acquiresleep(struct sleeplock*);
@@ -166,6 +178,7 @@ uint64          uvmalloc(pagetable_t, uint64, uint64, int);
 uint64          uvmdealloc(pagetable_t, uint64, uint64);
 int             uvmcopy(pagetable_t, pagetable_t, uint64);
 void            uvmfree(pagetable_t, uint64);
+pte_t *         uvmwalkcow(pagetable_t p, uint64 va, int *cow_result);
 void            uvmunmap(pagetable_t, uint64, uint64, int);
 void            uvmclear(pagetable_t, uint64);
 pte_t *         walk(pagetable_t, uint64, int);
@@ -173,6 +186,7 @@ uint64          walkaddr(pagetable_t, uint64);
 int             copyout(pagetable_t, uint64, char *, uint64);
 int             copyin(pagetable_t, char *, uint64, uint64);
 int             copyinstr(pagetable_t, char *, uint64, uint64);
+void            vmprint(pagetable_t);
 
 // plic.c
 void            plicinit(void);
@@ -187,3 +201,42 @@ void            virtio_disk_intr(void);
 
 // number of elements in fixed-size array
 #define NELEM(x) (sizeof(x)/sizeof((x)[0]))
+
+
+
+#ifdef LAB_PGTBL
+// vmcopyin.c
+int             copyin_new(pagetable_t, char *, uint64, uint64);
+int             copyinstr_new(pagetable_t, char *, uint64, uint64);
+#endif
+
+// stats.c
+void            statsinit(void);
+void            statsinc(void);
+
+// sprintf.c
+int             snprintf(char*, int, char*, ...);
+
+#ifdef KCSAN
+void            kcsaninit();
+#endif
+
+// pci.c
+void            pci_init();
+
+// e1000.c
+void            e1000_init(uint32 *);
+void            e1000_intr(void);
+int             e1000_transmit(struct mbuf*);
+
+// net.c
+void            net_rx(struct mbuf*);
+void            net_tx_udp(struct mbuf*, uint32, uint16, uint16);
+
+// sysnet.c
+void            sockinit(void);
+int             sockalloc(struct file **, uint32, uint16, uint16);
+void            sockclose(struct sock *);
+int             sockread(struct sock *, uint64, int);
+int             sockwrite(struct sock *, uint64, int);
+void            sockrecvudp(struct mbuf*, uint32, uint16, uint16);

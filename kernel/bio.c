@@ -24,31 +24,38 @@
 #include "buf.h"
 
 struct {
-  struct spinlock lock;
-  struct buf buf[NBUF];
+  struct bcache_bucket {
+    struct spinlock lock;
+    struct buf     *head;
+  } table[13];
 
-  // Linked list of all buffers, through prev/next.
-  // Sorted by how recently the buffer was used.
-  // head.next is most recent, head.prev is least.
-  struct buf head;
+  struct spinlock lock;
+  struct buf      buf[NBUF];
 } bcache;
 
 void
 binit(void)
 {
-  struct buf *b;
-
   initlock(&bcache.lock, "bcache");
 
-  // Create linked list of buffers
-  bcache.head.prev = &bcache.head;
-  bcache.head.next = &bcache.head;
-  for(b = bcache.buf; b < bcache.buf+NBUF; b++){
-    b->next = bcache.head.next;
-    b->prev = &bcache.head;
-    initsleeplock(&b->lock, "buffer");
-    bcache.head.next->prev = b;
-    bcache.head.next = b;
+  // initialize the sharded locks
+  for (int i = 0; i < NELEM(bcache.table); i++) {
+    struct bcache_bucket *b = bcache.table + i;
+
+    initlock(&b->lock, "bcache shard");
+
+    b->head = 0;
+  }
+
+  // initalize the lock for each buf, and allocate them in advance to one of the sharded locks
+  for (int i = 0; i < NELEM(bcache.buf); i++) {
+    struct buf           *buf    = bcache.buf + i;
+    struct bcache_bucket *bucket = bcache.table + (i % NELEM(bcache.table));
+
+    initsleeplock(&buf->lock, "buffer");
+
+    buf->next    = bucket->head;
+    bucket->head = buf;
   }
 }
 
@@ -58,34 +65,104 @@ binit(void)
 static struct buf*
 bget(uint dev, uint blockno)
 {
-  struct buf *b;
+  // grab the bucket that corresponds to the given blockno
+  struct bcache_bucket *bucket = bcache.table + (blockno % NELEM(bcache.table));
 
+  // then acquire the lock before inspecting the list
+  acquire(&bucket->lock);
+
+  for (struct buf *b = bucket->head; b != 0; b = b->next) {
+    // is the buf for this block already in the list?
+    if (b->dev == dev && b->blockno == blockno) {
+      b->refcnt++;
+
+      release(&bucket->lock);
+      acquiresleep(&b->lock);
+      return b;
+    }
+  }
+
+  // since we didn't find it in the list, we'll look for a free buf in the list we already have a
+  // lock for
+  for (struct buf *b = bucket->head; b != 0; b = b->next) {
+    if (b->refcnt == 0) {
+      b->refcnt++;
+
+      b->dev     = dev;
+      b->blockno = blockno;
+
+      b->valid  = 0;
+      b->refcnt = 1;
+
+      release(&bucket->lock);
+      acquiresleep(&b->lock);
+      return b;
+    }
+  }
+
+  // no suitable buf was found, so we have to give up the lock to let other threads proceed
+  release(&bucket->lock);
+
+  // we're now going to attempt to steal a buf from a different shard, so we must first grab the
+  // "bcache" lock, which we use as a way to grant permission to hold multiple lock shards.
+  //
+  // since only one process can have this lock, we know that we can't run into a scenario where
+  // process A holds lock 1, and process B holds lock 2, and they're both trying to acquire the
+  // lock the other process has.
   acquire(&bcache.lock);
 
-  // Is the block already cached?
-  for(b = bcache.head.next; b != &bcache.head; b = b->next){
-    if(b->dev == dev && b->blockno == blockno){
-      b->refcnt++;
-      release(&bcache.lock);
-      acquiresleep(&b->lock);
-      return b;
-    }
-  }
+  // grab the original bucket lock before we start our journey
+  acquire(&bucket->lock);
 
-  // Not cached.
-  // Recycle the least recently used (LRU) unused buffer.
-  for(b = bcache.head.prev; b != &bcache.head; b = b->prev){
-    if(b->refcnt == 0) {
-      b->dev = dev;
-      b->blockno = blockno;
-      b->valid = 0;
-      b->refcnt = 1;
-      release(&bcache.lock);
-      acquiresleep(&b->lock);
-      return b;
+  // the bucket we're attempting to steal from. starts at the bucket to the right of the bucket
+  // we expected to find the buf in
+  struct bcache_bucket *victim = bucket;
+
+  while (1) {
+    // move to the next lock shard, potentially looping around
+    if (++victim == bcache.table + NELEM(bcache.table)) {
+      victim = bcache.table;
     }
+
+    // we've looped around completely
+    if (victim == bucket) {
+      panic("bget: no buffers");
+    }
+
+    acquire(&victim->lock);
+
+    // look for a suitable (i.e. unused) buf from the victim bucket
+    for (struct buf *curr = victim->head, *prev = 0; curr != 0; prev = curr, curr = curr->next) {
+      if (curr->refcnt == 0) {
+        curr->dev     = dev;
+        curr->blockno = blockno;
+
+        curr->valid  = 0;
+        curr->refcnt = 1;
+
+        // remove curr from the victim
+        if (prev) {
+          prev->next = curr->next;
+        } else {
+          victim->head = curr->next;
+        }
+
+        // append cur to the target
+        curr->next   = bucket->head;
+        bucket->head = curr;
+
+        release(&bucket->lock);
+        release(&victim->lock);
+        release(&bcache.lock);
+
+        acquiresleep(&curr->lock);
+
+        return curr;
+      }
+    }
+
+    release(&victim->lock);
   }
-  panic("bget: no buffers");
 }
 
 // Return a locked buf with the contents of the indicated block.
@@ -119,35 +196,19 @@ brelse(struct buf *b)
   if(!holdingsleep(&b->lock))
     panic("brelse");
 
+  b->refcnt--;
+
   releasesleep(&b->lock);
-
-  acquire(&bcache.lock);
-  b->refcnt--;
-  if (b->refcnt == 0) {
-    // no one is waiting for it.
-    b->next->prev = b->prev;
-    b->prev->next = b->next;
-    b->next = bcache.head.next;
-    b->prev = &bcache.head;
-    bcache.head.next->prev = b;
-    bcache.head.next = b;
-  }
-  
-  release(&bcache.lock);
 }
 
 void
-bpin(struct buf *b) {
-  acquire(&bcache.lock);
+bpin(struct buf *b)
+{
   b->refcnt++;
-  release(&bcache.lock);
 }
 
 void
-bunpin(struct buf *b) {
-  acquire(&bcache.lock);
+bunpin(struct buf *b)
+{
   b->refcnt--;
-  release(&bcache.lock);
 }
-
-

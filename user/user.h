@@ -1,4 +1,9 @@
+#ifdef LAB_MMAP
+typedef unsigned long size_t;
+typedef long int off_t;
+#endif
 struct stat;
+struct sysinfo;
 
 // system calls
 int fork(void);
@@ -22,6 +27,13 @@ int getpid(void);
 char* sbrk(int);
 int sleep(int);
 int uptime(void);
+int trace(int);
+int sysinfo(struct sysinfo *);
+int connect(uint32, uint16, uint16);
+int pgaccess(void *base, int len, void *mask);
+int sigalarm(int ticks, void (*handler)());
+int sigreturn(void);
+int backtrace(void);
 
 // ulib.c
 int stat(const char*, struct stat*);
@@ -39,3 +51,5 @@ void free(void*);
 int atoi(const char*);
 int memcmp(const void *, const void *, uint);
 void *memcpy(void *, const void *, uint);
+int statistics(void*, int);
+int ugetpid(void);
