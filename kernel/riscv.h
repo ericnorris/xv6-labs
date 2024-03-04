@@ -295,6 +295,14 @@ r_sp()
   return x;
 }
 
+static inline uint64
+r_fp()
+{
+  uint64 x;
+  asm volatile("mv %0, s0" : "=r" (x) );
+  return x;
+}
+
 // read and write tp, the thread pointer, which xv6 uses to hold
 // this core's hartid (core number), the index into cpus[].
 static inline uint64
@@ -327,14 +335,6 @@ sfence_vma()
   asm volatile("sfence.vma zero, zero");
 }
 
-static inline uint64
-r_fp()
-{
-  uint64 x;
-  asm volatile("mv %0, s0" : "=r"(x));
-  return x;
-}
-
 typedef uint64 pte_t;
 typedef uint64 *pagetable_t; // 512 PTEs
 
@@ -355,6 +355,9 @@ typedef uint64 *pagetable_t; // 512 PTEs
 #define PTE_A   (1L << 6) // accessed bit
 #define PTE_D   (1L << 7) // dirty bit
 #define PTE_COW (1L << 8) // the first reserved for software (RSW) bit, used to mark copy-on-write pages
+
+
+
 
 // shift a physical address to the right place for a PTE.
 #define PA2PTE(pa) ((((uint64)pa) >> 12) << 10)
