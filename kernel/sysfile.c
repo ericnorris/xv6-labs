@@ -301,6 +301,43 @@ create(char *path, short type, short major, short minor)
   return 0;
 }
 
+struct inode *
+follow_symlink(struct inode *current)
+{
+  int depth = 0;
+
+  while (current->type == T_SYMLINK) {
+    if (depth > 12) {
+      goto fail;
+    }
+
+    char target[MAXPATH];
+
+    if (readi(current, 0, (uint64)target, 0, sizeof(target)) < 0) {
+      goto fail;
+    }
+
+    struct inode *next = namei(target);
+
+    if (next == 0) {
+      goto fail;
+    }
+
+    iunlockput(current);
+    ilock(next);
+
+    current = next;
+
+    depth++;
+  }
+
+  return current;
+
+fail:
+  iunlockput(current);
+  return 0;
+}
+
 uint64
 sys_open(void)
 {
@@ -339,6 +376,15 @@ sys_open(void)
     iunlockput(ip);
     end_op();
     return -1;
+  }
+
+  if (ip->type == T_SYMLINK && (omode & O_NOFOLLOW) == 0) {
+    ip = follow_symlink(ip);
+
+    if (ip == 0) {
+      end_op();
+      return -1;
+    }
   }
 
   if((f = filealloc()) == 0 || (fd = fdalloc(f)) < 0){
@@ -504,7 +550,7 @@ sys_pipe(void)
   return 0;
 }
 
-int
+uint64
 sys_connect(void)
 {
   struct file *f;
@@ -525,4 +571,41 @@ sys_connect(void)
   }
 
   return fd;
+}
+
+uint64
+sys_symlink(void)
+{
+  int rv = 0;
+
+  char target[MAXPATH], linkpath[MAXPATH];
+
+  if (argstr(0, target, sizeof(target)) < 0) {
+    return -1;
+  }
+
+  if (argstr(1, linkpath, sizeof(linkpath)) < 0) {
+    return -1;
+  }
+
+  begin_op();
+
+  struct inode *link = create(linkpath, T_SYMLINK, 0, 0);
+
+  if (link == 0) {
+    rv = -1;
+    goto cleanup;
+  }
+
+  if (writei(link, 0, (uint64)target, 0, sizeof(target)) < sizeof(target)) {
+    rv = -1;
+    goto cleanup_inode;
+  }
+
+cleanup_inode:
+  iunlockput(link);
+cleanup:
+  end_op();
+
+  return rv;
 }

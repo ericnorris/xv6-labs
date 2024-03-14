@@ -187,7 +187,9 @@ UPROGS=\
 	$U/_nettests\
 	$U/_stats \
 	$U/_kalloctest\
-	$U/_bcachetest
+	$U/_bcachetest\
+	$U/_bigfile\
+	$U/_symlinktest
 
 
 
@@ -209,10 +211,6 @@ ph: notxv6/ph.c
 barrier: notxv6/barrier.c
 	gcc -o barrier -g -O2 $(XCFLAGS) notxv6/barrier.c -pthread
 
-ifeq ($(LAB),fs)
-UPROGS += \
-	$U/_bigfile
-endif
 
 fs.img: mkfs/mkfs README README-original user/xargstest.sh $(UPROGS)
 	mkfs/mkfs fs.img README README-original user/xargstest.sh $(UPROGS)
@@ -236,9 +234,7 @@ QEMUGDB = $(shell if $(QEMU) -help | grep -q '^-gdb'; \
 ifndef CPUS
 CPUS := 3
 endif
-ifeq ($(LAB),fs)
-CPUS := 1
-endif
+
 
 FWDPORT = $(shell expr `id -u` % 5000 + 25999)
 
