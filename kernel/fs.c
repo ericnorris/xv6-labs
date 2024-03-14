@@ -24,7 +24,7 @@
 #define min(a, b) ((a) < (b) ? (a) : (b))
 // there should be one superblock per disk device, but we run with
 // only one device
-struct superblock sb; 
+struct superblock sb;
 
 // Read the super block.
 static void
@@ -182,7 +182,7 @@ void
 iinit()
 {
   int i = 0;
-  
+
   initlock(&itable.lock, "itable");
   for(i = 0; i < NINODE; i++) {
     initsleeplock(&itable.inode[i].lock, "inode");
@@ -299,7 +299,7 @@ ilock(struct inode *ip)
     panic("ilock");
 
   acquiresleep(&ip->lock);
-  
+
   if(ip->valid == 0){
     bp = bread(ip->dev, IBLOCK(ip->inum, sb));
     dip = (struct dinode*)bp->data + ip->inum%IPB;
@@ -380,43 +380,98 @@ iunlockput(struct inode *ip)
 // If there is no such block, bmap allocates one.
 // returns 0 if out of disk space.
 static uint
-bmap(struct inode *ip, uint bn)
+bmap(struct inode *ip, uint inode_bn)
 {
-  uint addr, *a;
-  struct buf *bp;
+  // The current level of indirection; 2 is doubly indirect, 1 is singly indirect, and 0 is no
+  // indirection at all.
+  uint indirection;
 
-  if(bn < NDIRECT){
-    if((addr = ip->addrs[bn]) == 0){
-      addr = balloc(ip->dev);
-      if(addr == 0)
-        return 0;
-      ip->addrs[bn] = addr;
-    }
-    return addr;
-  }
-  bn -= NDIRECT;
+  // The offset of the inode_bn within the current level of indirection.
+  uint offset;
 
-  if(bn < NINDIRECT){
-    // Load indirect block, allocating if necessary.
-    if((addr = ip->addrs[NDIRECT]) == 0){
-      addr = balloc(ip->dev);
-      if(addr == 0)
-        return 0;
-      ip->addrs[NDIRECT] = addr;
-    }
-    bp = bread(ip->dev, addr);
-    a = (uint*)bp->data;
-    if((addr = a[bn]) == 0){
-      addr = balloc(ip->dev);
-      if(addr){
-        a[bn] = addr;
-        log_write(bp);
-      }
-    }
-    brelse(bp);
-    return addr;
+  // The physical block number of the current level of indirection, e.g. at level 2 this represents
+  // the block number of the doubly indirect block.
+  uint device_bn;
+
+  if (inode_bn < NDIRECT) {
+    indirection = 0;
+    offset      = inode_bn;
+  } else if (inode_bn < NDIRECT + NINDIRECT) {
+    indirection = 1;
+    offset      = NDIRECT;
+    inode_bn    = inode_bn - NDIRECT;
+  } else if (inode_bn < NDIRECT + NINDIRECT + NDOUBLEINDIRECT) {
+    indirection = 2;
+    offset      = NDIRECT + 1;
+    inode_bn    = inode_bn - NDIRECT - NINDIRECT;
+  } else {
+    panic("bmap: out of range");
   }
-  panic("bmap: out of range");
+
+  device_bn = ip->addrs[offset];
+
+  if (device_bn == 0) {
+    device_bn = ip->addrs[offset] = balloc(ip->dev);
+  }
+
+  for (; indirection > 0 && device_bn > 0; indirection--) {
+    // A single indirect block can address 256 blocks (1024 / 4), and so each level of indirection
+    // can address 256^(level #) blocks; e.g. a doubly indirect block points to 256 singly
+    // indirect blocks.
+    //
+    // To go down a level, we must find which of the current level's 256 blocks will contain the
+    // inode block number, i.e. the offset. Since each subsequent level can address 256^(level # - 1)
+    // blocks, we can divide the current inode block number by 256^(level # - 1).
+    //
+    // Since 256 is 2^8, and multiplying two exponents of the same base is equivalent to adding the
+    // exponents, 256^(level # - 1) can be expressed as (1 << 8 * (level # - 1)).
+    //
+    // After we've figured out the offset for the current level, we can reduce the inode_bn for the
+    // next level; this is the remainder of addressable blocks for the next level.
+    offset   = inode_bn / (1 << 8 * (indirection - 1));
+    inode_bn = inode_bn % (1 << 8 * (indirection - 1));
+
+    // read in the physical block
+    struct buf *block = bread(ip->dev, device_bn);
+
+    // treat the disk block as an array of block numbers
+    uint *block_numbers = (uint *)block->data;
+
+    // check if we need to allocate a block for this offset
+    if (block_numbers[offset] == 0 && (block_numbers[offset] = balloc(ip->dev))) {
+      log_write(block);
+    }
+
+    brelse(block);
+
+    device_bn = block_numbers[offset];
+  }
+
+  return device_bn;
+}
+
+void
+itrunc_rec_bfree(uint dev, uint device_bn, uint indirection)
+{
+  if (indirection == 0) {
+    bfree(dev, device_bn);
+
+    return;
+  }
+
+  struct buf *block         = bread(dev, device_bn);
+  uint       *block_numbers = (uint *)block->data;
+
+  for (uint i = 0; i < NINDIRECT; i++) {
+    if (block_numbers[i] == 0) {
+      continue;
+    }
+
+    itrunc_rec_bfree(dev, block_numbers[i], indirection - 1);
+  }
+
+  brelse(block);
+  bfree(dev, device_bn);
 }
 
 // Truncate inode (discard contents).
@@ -424,30 +479,20 @@ bmap(struct inode *ip, uint bn)
 void
 itrunc(struct inode *ip)
 {
-  int i, j;
-  struct buf *bp;
-  uint *a;
-
-  for(i = 0; i < NDIRECT; i++){
-    if(ip->addrs[i]){
-      bfree(ip->dev, ip->addrs[i]);
-      ip->addrs[i] = 0;
+  for (int i = NDIRECT + 1; i >= 0; i--) {
+    if (ip->addrs[i] == 0) {
+      continue;
     }
+
+    uint indirection = i >= NDIRECT ? (i - NDIRECT) + 1 : 0;
+
+    itrunc_rec_bfree(ip->dev, ip->addrs[i], indirection);
+
+    ip->addrs[i] = 0;
   }
 
-  if(ip->addrs[NDIRECT]){
-    bp = bread(ip->dev, ip->addrs[NDIRECT]);
-    a = (uint*)bp->data;
-    for(j = 0; j < NINDIRECT; j++){
-      if(a[j])
-        bfree(ip->dev, a[j]);
-    }
-    brelse(bp);
-    bfree(ip->dev, ip->addrs[NDIRECT]);
-    ip->addrs[NDIRECT] = 0;
-  }
-  
   ip->size = 0;
+
   iupdate(ip);
 }
 
