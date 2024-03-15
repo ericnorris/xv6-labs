@@ -442,9 +442,9 @@ bmap(struct inode *ip, uint inode_bn)
       log_write(block);
     }
 
-    brelse(block);
-
     device_bn = block_numbers[offset];
+
+    brelse(block);
   }
 
   return device_bn;
