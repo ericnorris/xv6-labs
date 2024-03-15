@@ -1,8 +1,6 @@
-#ifdef LAB_MMAP
+// clang-format off
 typedef unsigned long size_t;
 typedef long int off_t;
-#endif
-// clang-format off
 
 struct buf;
 struct context;

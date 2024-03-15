@@ -1,7 +1,5 @@
-#ifdef LAB_MMAP
 typedef unsigned long size_t;
-typedef long int off_t;
-#endif
+typedef long int      off_t;
 struct stat;
 struct sysinfo;
 
