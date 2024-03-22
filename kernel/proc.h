@@ -1,3 +1,5 @@
+#include "defs.h"
+
 // Saved registers for kernel context switches.
 struct context {
   uint64 ra;
@@ -106,6 +108,7 @@ struct proc {
   char name[16];               // Process name (debugging)
   int trace_mask;              // Mask for tracing syscalls
   struct usyscall *usyscall;   // read-only data page for userspace sytem calls
+  struct vm_area   *vma_list;   // This process's VMAs.
 
   // still private, alarm-only fields
   uint alarm_interval;               // interval requested by the process's sigalarm() call

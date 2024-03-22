@@ -195,7 +195,8 @@ UPROGS=\
 	$U/_kalloctest\
 	$U/_bcachetest\
 	$U/_bigfile\
-	$U/_symlinktest
+	$U/_symlinktest\
+	$U/_mmaptest
 
 
 
