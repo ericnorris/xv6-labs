@@ -1,4 +1,6 @@
 // clang-format off
+typedef unsigned long size_t;
+typedef long int off_t;
 
 struct buf;
 struct context;
@@ -186,6 +188,11 @@ uint64          walkaddr(pagetable_t, uint64);
 int             copyout(pagetable_t, uint64, char *, uint64);
 int             copyin(pagetable_t, char *, uint64, uint64);
 int             copyinstr(pagetable_t, char *, uint64, uint64);
+uint64          mmap(struct proc *p, size_t len, int prot, int flags, int fd, off_t offset);
+void            mmap_copy(struct proc *p, struct proc *np);
+int             munmap(struct proc *p, uint64 addr, size_t len);
+int             munmap_all(struct proc *p);
+int             mmap_page_fault_handler(struct proc *p, uint64 va_page);
 void            vmprint(pagetable_t);
 
 // plic.c

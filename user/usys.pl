@@ -41,6 +41,8 @@ entry("sysinfo");
 entry("sigalarm");
 entry("sigreturn");
 entry("symlink");
+entry("mmap");
+entry("munmap");
 entry("connect");
 entry("pgaccess");
 entry("backtrace");

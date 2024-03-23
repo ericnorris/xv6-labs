@@ -1,7 +1,5 @@
-#ifdef LAB_MMAP
 typedef unsigned long size_t;
-typedef long int off_t;
-#endif
+typedef long int      off_t;
 struct stat;
 struct sysinfo;
 
@@ -32,6 +30,8 @@ int sysinfo(struct sysinfo *);
 int sigalarm(int ticks, void (*handler)());
 int sigreturn(void);
 int symlink(char *target, char *linkpath);
+void *mmap(void *addr, size_t len, int prot, int flags, int fd, off_t offset);
+int   munmap(void *addr, size_t len);
 int connect(uint32, uint16, uint16);
 int pgaccess(void *base, int len, void *mask);
 int backtrace(void);

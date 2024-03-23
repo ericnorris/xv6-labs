@@ -5,6 +5,7 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "fcntl.h"
 
 struct spinlock tickslock;
 uint ticks;
@@ -97,7 +98,30 @@ usertrap(void)
 
     break;
 
-  case SCAUSE_WRITE_PAGE_FAULT:
+  case SCAUSE_READ_PAGE_FAULT: {
+    uint64 va      = r_stval();
+    uint64 va_page = PGROUNDDOWN(va);
+
+    if (va >= MAXVA) {
+      printf("usertrap(): invalid va pid=%d\n", p->pid);
+      printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
+      setkilled(p);
+      goto userspace;
+    }
+
+    uint64 pa = walkaddr(p->pagetable, va_page);
+
+    if (pa || (mmap_page_fault_handler(p, va_page) <= 0)) {
+      printf("usertrap(): read page fault pid=%d\n", p->pid);
+      printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
+      setkilled(p);
+      goto userspace;
+    }
+
+    break;
+  }
+
+  case SCAUSE_WRITE_PAGE_FAULT: {
     uint64 va      = r_stval();
     uint64 va_page = PGROUNDDOWN(va);
 
@@ -118,6 +142,10 @@ usertrap(void)
       goto userspace;
     }
 
+    if (pte == 0 && mmap_page_fault_handler(p, va_page) > 0) {
+      break;
+    }
+
     if (pte == 0 || !(PTE_FLAGS(*pte) & PTE_W)) {
       printf("usertrap(): write page fault pid=%d\n", p->pid);
       printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
@@ -126,6 +154,7 @@ usertrap(void)
     }
 
     break;
+  }
 
   default:
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);

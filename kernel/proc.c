@@ -2,9 +2,13 @@
 #include "param.h"
 #include "memlayout.h"
 #include "riscv.h"
-#include "spinlock.h"
-#include "proc.h"
 #include "defs.h"
+#include "spinlock.h"
+#include "sleeplock.h"
+#include "fs.h"
+#include "proc.h"
+#include "file.h"
+#include "fcntl.h"
 
 struct cpu cpus[NCPU];
 
@@ -333,7 +337,7 @@ fork(void)
   // copy saved user registers.
   *(np->trapframe) = *(p->trapframe);
 
-  // preserve trace() mask in child
+  // preserve trace() mask in child.
   np->trace_mask = p->trace_mask;
 
   // Cause fork to return 0 in the child.
@@ -348,6 +352,9 @@ fork(void)
   safestrcpy(np->name, p->name, sizeof(p->name));
 
   pid = np->pid;
+
+  // copy mmap'ed VMAs.
+  mmap_copy(p, np);
 
   release(&np->lock);
 
@@ -396,6 +403,8 @@ exit(int status)
       p->ofile[fd] = 0;
     }
   }
+
+  munmap_all(p);
 
   begin_op();
   iput(p->cwd);

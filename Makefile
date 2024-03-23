@@ -50,6 +50,7 @@ OBJS_KCSAN += \
 	$K/kcsan.o
 endif
 
+
 # riscv64-unknown-elf- or riscv64-linux-gnu-
 # perhaps in /opt/riscv/bin
 #TOOLPREFIX =
@@ -90,6 +91,11 @@ CFLAGS += -ffreestanding -fno-common -nostdlib -mno-relax
 CFLAGS += -I.
 CFLAGS += $(shell $(CC) -fno-stack-protector -E -x c /dev/null >/dev/null 2>&1 && echo -fno-stack-protector)
 CFLAGS += -DNET_TESTS_PORT=$(SERVERPORT)
+
+ifdef KCSAN
+CFLAGS += -DKCSAN
+KCSANFLAG = -fsanitize=thread -fno-inline
+endif
 
 ifdef KCSAN
 CFLAGS += -DKCSAN
@@ -189,7 +195,8 @@ UPROGS=\
 	$U/_kalloctest\
 	$U/_bcachetest\
 	$U/_bigfile\
-	$U/_symlinktest
+	$U/_symlinktest\
+	$U/_mmaptest
 
 
 
@@ -234,6 +241,8 @@ QEMUGDB = $(shell if $(QEMU) -help | grep -q '^-gdb'; \
 ifndef CPUS
 CPUS := 3
 endif
+
+FWDPORT = $(shell expr `id -u` % 5000 + 25999)
 
 
 FWDPORT = $(shell expr `id -u` % 5000 + 25999)

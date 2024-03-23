@@ -5,8 +5,12 @@
 #include "riscv.h"
 #include "defs.h"
 #include "spinlock.h"
+#include "sleeplock.h"
 #include "proc.h"
 #include "fs.h"
+#include "vm.h"
+#include "fcntl.h"
+#include "file.h"
 
 /*
  * the kernel's page table.
@@ -16,6 +20,9 @@ pagetable_t kernel_pagetable;
 extern char etext[];  // kernel.ld sets this to end of kernel code.
 
 extern char trampoline[]; // trampoline.S
+
+// A statically-allocated array of virtual memory areas for processes to use.
+struct vm_area vmas[NPROC] = {0};
 
 // Make a direct-map page table for the kernel.
 pagetable_t
@@ -521,6 +528,254 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   } else {
     return -1;
   }
+}
+
+struct vm_area *
+vma_alloc()
+{
+  for (int i = 0; i < NELEM(vmas); i++) {
+    if (__sync_bool_compare_and_swap(&vmas[i].used, 0, 1)) {
+      return &vmas[i];
+    }
+  }
+
+  panic("vma_alloc: no free vmas\n");
+}
+
+// Find a vm_area that contains the address within the linked list. If **prev is non-null, it will
+// keep track of the previous linked list node.
+struct vm_area *
+vma_find(struct vm_area *list, uint64 addr, struct vm_area **prev)
+{
+  for (struct vm_area *vma = list; vma != 0; vma = vma->vm_next) {
+    if (addr >= vma->vm_start && addr < vma->vm_end) {
+      return vma;
+    }
+
+    if (prev) {
+      *prev = vma;
+    }
+  }
+
+  return 0;
+}
+
+// Map len bytes of the file fd in the process's address space.
+uint64
+mmap(struct proc *p, size_t len, int prot, int flags, int fd, off_t offset)
+{
+  // Ensure the proc is not trying to map a read-only file with writable permissions if it expects
+  // writes to be shared with the underlying file.
+  if (p->ofile[fd]->writable == 0 && (prot & PROT_WRITE) && (flags & MAP_SHARED)) {
+    return ~0;
+  }
+
+  // Ensure the proc is not trying to map a non-readable file as readable.
+  if (p->ofile[fd]->readable == 0 && (prot & PROT_READ)) {
+    return ~0;
+  }
+
+  // Offset must be page-aligned.
+  if (offset % PGSIZE != 0) {
+    return ~0;
+  }
+
+  struct vm_area *vma = vma_alloc();
+
+  // Work backwards from the last VMA for this proc, or the top of the address space.
+  uint64 max_va = p->vma_list ? p->vma_list->vm_start : USYSCALL;
+
+  vma->vm_start = PGROUNDDOWN(max_va - len);
+  vma->vm_end   = vma->vm_start + len;
+
+  vma->vm_prot        = prot;
+  vma->vm_flags       = flags;
+  vma->vm_file        = filedup(p->ofile[fd]);
+  vma->vm_file_offset = offset;
+  vma->vm_next        = p->vma_list;
+
+  p->vma_list = vma;
+
+  return vma->vm_start;
+}
+
+// Copy the mmap'd vma_area structs from process *p to *np.
+void
+mmap_copy(struct proc *p, struct proc *np)
+{
+  for (struct vm_area *vma = p->vma_list; vma; vma = vma->vm_next) {
+    struct vm_area *copy = vma_alloc();
+
+    *copy = *vma;
+
+    copy->vm_next = np->vma_list;
+    np->vma_list  = copy;
+
+    filedup(copy->vm_file);
+  }
+}
+
+// "Free" a given vm_area struct by writing any changes to disk if it was mappped with MAP_SHARED,
+// and by unmapping the vm_area from the process. Returns the next vm_area struct in the list.
+struct vm_area *
+vma_free(struct proc *p, struct vm_area *prev, struct vm_area *vma)
+{
+  uint offset     = vma->vm_file_offset;
+  uint bytes_left = vma->vm_end - vma->vm_start;
+
+  for (uint64 page = vma->vm_start; page < vma->vm_end; page += PGSIZE) {
+    pte_t *pte = walk(p->pagetable, page, 0);
+
+    // if we haven't yet mapped the page, there's nothing to do here
+    if (pte == 0 || (PTE_FLAGS(*pte) & PTE_V) == 0) {
+      continue;
+    }
+
+    uint length = bytes_left > PGSIZE ? PGSIZE : bytes_left;
+
+    if ((vma->vm_flags & MAP_SHARED) && (PTE_FLAGS(*pte) & PTE_D)) {
+      begin_op();
+      ilock(vma->vm_file->ip);
+
+      writei(vma->vm_file->ip, 0, PTE2PA(*pte), offset, length);
+
+      iunlock(vma->vm_file->ip);
+      end_op();
+    }
+
+    offset     += PGSIZE;
+    bytes_left -= length;
+
+    uvmunmap(p->pagetable, page, 1, 1);
+  }
+
+  fileclose(vma->vm_file);
+
+  struct vm_area *next = vma->vm_next;
+
+  if (prev) {
+    prev->vm_next = next;
+  } else {
+    p->vma_list = next;
+  }
+
+  // "Free" the vm_area
+  *vma = (const struct vm_area){0};
+
+  return next;
+}
+
+// Unmap any vm_area structs in the range specified by [addr, addr + len].
+int
+munmap(struct proc *p, uint64 addr, size_t len)
+{
+  uint64 unmap_start = PGROUNDDOWN((uint64)addr);
+  uint64 unmap_end   = PGROUNDUP(unmap_start + len);
+
+  struct vm_area *prev = 0;
+  struct vm_area *vma  = vma_find(p->vma_list, unmap_start, &prev);
+
+  if (vma == 0) {
+    // "If there are no mappings in the specified address range, then munmap() has no effect.""
+    return 0;
+  }
+
+  // We may have unmap_start > vma_start->vm_start, which means we need to split the vma into:
+  //
+  //   - vma [start, unmap_start]
+  //   - new [unmap_start, end]
+  if (unmap_start > vma->vm_start) {
+    struct vm_area *new = vma_alloc();
+
+    new->vm_start       = unmap_start;
+    new->vm_end         = vma->vm_end;
+    new->vm_prot        = vma->vm_prot;
+    new->vm_flags       = vma->vm_flags;
+    new->vm_next        = vma->vm_next;
+    new->vm_file        = filedup(vma->vm_file);
+    new->vm_file_offset = vma->vm_file_offset + (unmap_start - vma->vm_start);
+
+    vma->vm_end  = unmap_start;
+    vma->vm_next = new;
+
+    prev = vma;
+    vma  = new;
+  }
+
+  do {
+    // We may have unmap_end < end, which means we need to split the vma (potentially for the second
+    // time) into:
+    //
+    //   - vma [start, unmap_end]
+    //   - new [unmap_end, end]
+    if (unmap_end < vma->vm_end) {
+      struct vm_area *new = vma_alloc();
+
+      new->vm_start       = unmap_end;
+      new->vm_end         = vma->vm_end;
+      new->vm_prot        = vma->vm_prot;
+      new->vm_flags       = vma->vm_flags;
+      new->vm_next        = vma->vm_next;
+      new->vm_file        = filedup(vma->vm_file);
+      new->vm_file_offset = vma->vm_file_offset + (unmap_end - vma->vm_start);
+
+      vma->vm_end  = unmap_end;
+      vma->vm_next = new;
+    }
+
+    vma = vma_free(p, prev, vma);
+  } while (vma && (unmap_end > vma->vm_start));
+
+  return 0;
+}
+
+// Unmap all vm_area structs for the process *p.
+int
+munmap_all(struct proc *p)
+{
+  for (struct vm_area *vma = p->vma_list; vma; vma = vma_free(p, 0, vma)) {}
+
+  return 0;
+}
+
+// If the address va is within the process's mmap'd address space, allocates a physical page and
+// copies the file contents for the vm_area struct that va intersects.
+int
+mmap_page_fault_handler(struct proc *p, uint64 va)
+{
+  if ((va % PGSIZE) != 0) {
+    panic("mmap_page_fault_handler: va not page-aligned");
+  }
+
+  struct vm_area *vma = vma_find(p->vma_list, va, 0);
+
+  if (vma == 0) {
+    return 0;
+  }
+
+  uint64 pa = (uint64)kalloc();
+
+  if (pa == 0) {
+    panic("mmap_page_fault_handler: no free mem\n");
+  }
+
+  memset((void *)pa, 0, PGSIZE);
+
+  uint offset = vma->vm_file_offset + (va - vma->vm_start);
+  uint length = vma->vm_end - offset > PGSIZE ? PGSIZE : vma->vm_end - offset;
+
+  ilock(vma->vm_file->ip);
+  readi(vma->vm_file->ip, 0, pa, offset, length);
+  iunlock(vma->vm_file->ip);
+
+  int perm = ((vma->vm_prot && PROT_READ) * PTE_R) | ((vma->vm_prot && PROT_WRITE) * PTE_W) |
+             ((vma->vm_prot && PROT_EXEC) * PTE_X) | PTE_U;
+
+  if (mappages(p->pagetable, va, PGSIZE, pa, perm) < 0) {
+    return -1;
+  }
+
+  return 1;
 }
 
 void

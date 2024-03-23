@@ -379,4 +379,5 @@ typedef uint64 *pagetable_t; // 512 PTEs
 
 // scause values
 #define SCAUSE_ECALL_UMODE      8
+#define SCAUSE_READ_PAGE_FAULT  13
 #define SCAUSE_WRITE_PAGE_FAULT 15

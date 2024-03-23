@@ -156,7 +156,7 @@ sys_trace(void)
   return 0;
 }
 
-uint64
+int
 sys_sysinfo(void)
 {
   // user pointer to struct sysinfo
@@ -217,4 +217,38 @@ sys_backtrace(void)
   backtrace();
 
   return 0;
+}
+
+uint64
+sys_mmap(void)
+{
+  uint64 addr = 0;
+  size_t len  = 0;
+  int    prot = 0, flags = 0, fd = 0;
+  off_t  offset = 0;
+
+  argaddr(0, &addr);
+  argint(1, (int *)&len);
+  argint(2, &prot);
+  argint(3, &flags);
+  argint(4, &fd);
+  argint(5, (int *)&offset);
+
+  if (addr) {
+    panic("sys_mmap: non-zero addr not supported\n");
+  }
+
+  return mmap(myproc(), len, prot, flags, fd, offset);
+}
+
+int
+sys_munmap(void)
+{
+  uint64 addr = 0;
+  size_t len  = 0;
+
+  argaddr(0, &addr);
+  argint(1, (int *)&len);
+
+  return munmap(myproc(), addr, len);
 }
